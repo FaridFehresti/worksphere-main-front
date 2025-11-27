@@ -15,6 +15,10 @@ export type TeamMember = {
     email: string;
     name?: string | null;
   };
+   role?: {
+    id: string;
+    name: string;
+  } | null;
 };
 
 export async function fetchMyTeams(): Promise<Team[]> {

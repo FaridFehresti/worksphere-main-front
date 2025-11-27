@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { motion } from "framer-motion";
 import { setToken } from "@/lib/auth-storage";
@@ -39,7 +39,7 @@ const authTextFieldBaseProps: Partial<TextFieldProps> = {
   },
 };
 
-export default function LoginPage() {
+function LoginContent() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -50,34 +50,33 @@ export default function LoginPage() {
   const redirectFrom = searchParams.get("from") || "/";
 
   const handleSubmit = async (e: React.FormEvent) => {
-  e.preventDefault();
-  setLoading(true);
-  setError(null);
+    e.preventDefault();
+    setLoading(true);
+    setError(null);
 
-  try {
-    // 1. Login
-    const res = await apiClient.post(API_ENDPOINT.auth.login, {
-      email,
-      password,
-    });
+    try {
+      // 1. Login
+      const res = await apiClient.post(API_ENDPOINT.auth.login, {
+        email,
+        password,
+      });
 
-    const token = res.data.token;
-    setToken(token);
+      const token = res.data.token;
+      setToken(token);
 
-    // 2. Get full user profile
-    const me = await apiClient.get(API_ENDPOINT.auth.me);
+      // 2. Get full user profile
+      const me = await apiClient.get(API_ENDPOINT.auth.me);
 
-    // 3. Save in store
-    useUserStore.getState().setUser(me.data);
+      // 3. Save in store
+      useUserStore.getState().setUser(me.data);
 
-    router.push(redirectFrom);
-  } catch {
-    setError("Invalid credentials. Please check your email and password.");
-  } finally {
-    setLoading(false);
-  }
-};
-
+      router.push(redirectFrom);
+    } catch {
+      setError("Invalid credentials. Please check your email and password.");
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
     <main
@@ -124,115 +123,112 @@ export default function LoginPage() {
             <div className="pointer-events-none absolute -top-32 -right-20 h-64 w-64 rounded-full bg-primary-400/25 blur-3xl" />
             <div className="pointer-events-none absolute -bottom-32 -left-10 h-56 w-56 rounded-full bg-accent-400/25 blur-3xl" />
 
-          <CardContent className="relative p-8 sm:p-10 space-y-10">
+            <CardContent className="relative p-8 sm:p-10 space-y-10">
+              {/* Top header */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between text-[12px] text-graybrand-100">
+                  <span className="inline-flex items-center gap-2">
+                    <span className="h-1 w-6 rounded-full bg-primary-300" />
+                    Welcome back
+                  </span>
 
-  {/* Top header */}
-  <div className="space-y-3">
-    <div className="flex items-center justify-between text-[12px] text-graybrand-100">
-      <span className="inline-flex items-center gap-2">
-        <span className="h-1 w-6 rounded-full bg-primary-300" />
-        Welcome back
-      </span>
+                  <button
+                    type="button"
+                    onClick={() => router.push("/auth/register")}
+                    className="text-primary-100 hover:text-primary-50 font-medium transition-colors"
+                  >
+                    Create account
+                  </button>
+                </div>
 
-      <button
-        type="button"
-        onClick={() => router.push("/auth/register")}
-        className="text-primary-100 hover:text-primary-50 font-medium transition-colors"
-      >
-        Create account
-      </button>
-    </div>
+                <div className="space-y-1">
+                  <Typography
+                    variant="h4"
+                    className="font-display text-bglight tracking-[0.18em] uppercase"
+                  >
+                    WorkSphere
+                  </Typography>
 
-    <div className="space-y-1">
-      <Typography
-        variant="h4"
-        className="font-display text-bglight tracking-[0.18em] uppercase"
-      >
-        WorkSphere
-      </Typography>
+                  <Typography className="text-graybrand-50 text-sm leading-relaxed">
+                    Log in to sync your async work, across timezones.
+                  </Typography>
+                </div>
+              </div>
 
-      <Typography className="text-graybrand-50 text-sm leading-relaxed">
-        Log in to sync your async work, across timezones.
-      </Typography>
-    </div>
-  </div>
+              {/* Error */}
+              {error && (
+                <div className="text-sm rounded-md bg-red-950/70 text-red-100 px-3 py-2 border border-red-400/60">
+                  {error}
+                </div>
+              )}
 
-  {/* Error */}
-  {error && (
-    <div className="text-sm rounded-md bg-red-950/70 text-red-100 px-3 py-2 border border-red-400/60">
-      {error}
-    </div>
-  )}
+              {/* Form */}
+              <form onSubmit={handleSubmit} className="space-y-6">
+                {/* Inputs */}
+                <div className="space-y-4">
+                  <TextField
+                    {...authTextFieldBaseProps}
+                    label="Email"
+                    type="email"
+                    sx={{
+                      marginBottom: "16px",
+                    }}
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                  />
 
-  {/* Form */}
-  <form onSubmit={handleSubmit} className="space-y-6">
+                  <TextField
+                    {...authTextFieldBaseProps}
+                    label="Password"
+                    type="password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                  />
+                </div>
 
-    {/* Inputs */}
-    <div className="space-y-4">
-      <TextField
-        {...authTextFieldBaseProps}
-        label="Email"
-        type="email"
-        sx={{
-          marginBottom:"16px"
-        }}
-        value={email}
-        onChange={(e) => setEmail(e.target.value)}
-      />
+                {/* Meta row */}
+                <div className="flex items-center justify-between text-[12px] text-graybrand-200">
+                  <span>Use your WorkSphere account credentials</span>
 
-      <TextField
-        {...authTextFieldBaseProps}
-        label="Password"
-        type="password"
-        value={password}
-        onChange={(e) => setPassword(e.target.value)}
-      />
-    </div>
+                  <button
+                    type="button"
+                    className="text-primary-200 hover:text-primary-50 transition-colors"
+                  >
+                    Forgot password?
+                  </button>
+                </div>
 
-    {/* Meta row */}
-    <div className="flex items-center justify-between text-[12px] text-graybrand-200">
-      <span>Use your WorkSphere account credentials</span>
+                {/* Submit */}
+                <Button
+                  type="submit"
+                  variant="contained"
+                  color="primary"
+                  fullWidth
+                  disabled={loading}
+                  className="
+                    h-11 font-sans font-medium
+                    bg-primary-500 hover:bg-primary-400
+                    text-bgdark
+                    shadow-[0_12px_40px_rgba(108,207,246,0.5)]
+                    transition-all duration-200
+                    hover:shadow-[0_18px_60px_rgba(108,207,246,0.7)]
+                  "
+                >
+                  {loading ? "Logging in..." : "Login"}
+                </Button>
+              </form>
 
-      <button
-        type="button"
-        className="text-primary-200 hover:text-primary-50 transition-colors"
-      >
-        Forgot password?
-      </button>
-    </div>
-
-    {/* Submit */}
-    <Button
-      type="submit"
-      variant="contained"
-      color="primary"
-      fullWidth
-      disabled={loading}
-      className="
-        h-11 font-sans font-medium
-        bg-primary-500 hover:bg-primary-400
-        text-bgdark
-        shadow-[0_12px_40px_rgba(108,207,246,0.5)]
-        transition-all duration-200
-        hover:shadow-[0_18px_60px_rgba(108,207,246,0.7)]
-      "
-    >
-      {loading ? "Logging in..." : "Login"}
-    </Button>
-  </form>
-
-  {/* Footer */}
-  <Typography className="text-[12px] text-graybrand-100 text-center">
-    Don’t have an account?{" "}
-    <a
-      href="/auth/register"
-      className="font-medium text-primary-100 hover:text-primary-50 transition-colors"
-    >
-      Create one
-    </a>
-  </Typography>
-</CardContent>
-
+              {/* Footer */}
+              <Typography className="text-[12px] text-graybrand-100 text-center">
+                Don’t have an account?{" "}
+                <a
+                  href="/auth/register"
+                  className="font-medium text-primary-100 hover:text-primary-50 transition-colors"
+                >
+                  Create one
+                </a>
+              </Typography>
+            </CardContent>
           </Card>
         </motion.div>
 
@@ -305,5 +301,13 @@ export default function LoginPage() {
         </motion.div>
       </div>
     </main>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={<main className="min-h-screen" />}>
+      <LoginContent />
+    </Suspense>
   );
 }

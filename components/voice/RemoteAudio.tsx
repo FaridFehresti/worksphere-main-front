@@ -4,11 +4,12 @@
 import { useEffect, useRef } from "react";
 
 type RemoteAudioProps = {
-  stream?: MediaStream;
-  volume?: number;      // 0–1
+  stream?: MediaStream | null;
   muted?: boolean;
-  onLevel?: (level: number) => void; // 0–1
+  volume?: number;
+  onLevel?: (level: number) => void;
 };
+
 
 export default function RemoteAudio({
   stream,

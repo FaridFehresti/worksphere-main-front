@@ -426,8 +426,6 @@ export default function TeamDetailPanel({ teamId }: Props) {
                         {/* Occupants */}
                         {joined && (
                           <Box className="flex flex-wrap gap-1 pl-1 items-center mt-1">
-                            {/* Local avatar with glow */}
-                           // local user avatar + local level
 {currentUser && (
   <>
     <Avatar
@@ -456,7 +454,6 @@ export default function TeamDetailPanel({ teamId }: Props) {
   </>
 )}
 
-// remote peers
 {channelPeers.map((peer) =>
   peer.stream ? (
     <Tooltip key={peer.socketId} title={peer.userId || peer.socketId}>

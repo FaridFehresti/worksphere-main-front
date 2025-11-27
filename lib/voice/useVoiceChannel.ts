@@ -25,9 +25,10 @@ let myStream: MediaStream | null = null;
 type SignalType = "offer" | "answer" | "ice-candidate";
 
 type SignalEvent = {
-  fromSocketId: string;
+  fromSocketId?: string; // incoming from server
+  targetSocketId?: string; // outgoing to server
   type: SignalType;
-  data: any;
+  data: unknown;
 };
 
 type ChannelJoinedEvent = {
@@ -61,9 +62,7 @@ export function useVoiceChannel() {
 
   const { inputDeviceId, outputVolume } = useAudioStore();
 
-  const [joinedChannelId, setJoinedChannelId] = useState<string | null>(
-    null
-  );
+  const [joinedChannelId, setJoinedChannelId] = useState<string | null>(null);
   const [peers, setPeers] = useState<Record<string, VoicePeer>>({});
   const [connecting, setConnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -85,10 +84,7 @@ export function useVoiceChannel() {
   const ensureLocalStream = useCallback(async () => {
     if (myStream) return;
 
-    if (
-      !navigator.mediaDevices ||
-      !navigator.mediaDevices.getUserMedia
-    ) {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
       console.warn("[voice-hook] getUserMedia not available");
       return;
     }
@@ -96,14 +92,10 @@ export function useVoiceChannel() {
     try {
       console.log("[voice-hook] ensureLocalStream: trying to acquire mic");
       const constraints: MediaStreamConstraints = {
-        audio: inputDeviceId
-          ? { deviceId: { exact: inputDeviceId } }
-          : true,
+        audio: inputDeviceId ? { deviceId: { exact: inputDeviceId } } : true,
         video: false,
       };
-      const stream = await navigator.mediaDevices.getUserMedia(
-        constraints
-      );
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
       myStream = stream;
       console.log("[voice-hook] ensureLocalStream: got local media stream");
     } catch (err) {
@@ -325,6 +317,12 @@ export function useVoiceChannel() {
       socket.on(
         "signal",
         async ({ fromSocketId, type, data }: SignalEvent) => {
+          // ✅ guard to ensure fromSocketId is a string below
+          if (!fromSocketId) {
+            console.warn("[webrtc] signal without fromSocketId, ignoring");
+            return;
+          }
+
           const selfId = socket.id;
           if (fromSocketId === selfId) return;
 
@@ -370,7 +368,7 @@ export function useVoiceChannel() {
               }
 
               await pc.setRemoteDescription(
-                new RTCSessionDescription(data)
+                new RTCSessionDescription(data as RTCSessionDescriptionInit)
               );
               const answer = await pc.createAnswer();
               await pc.setLocalDescription(answer);
@@ -386,10 +384,7 @@ export function useVoiceChannel() {
                 try {
                   await pc.addIceCandidate(new RTCIceCandidate(c));
                 } catch (err) {
-                  console.error(
-                    "[webrtc] error adding queued ICE",
-                    err
-                  );
+                  console.error("[webrtc] error adding queued ICE", err);
                 }
               }
               pendingCandidates.delete(fromSocketId);
@@ -430,7 +425,7 @@ export function useVoiceChannel() {
               }
 
               await pc.setRemoteDescription(
-                new RTCSessionDescription(data)
+                new RTCSessionDescription(data as RTCSessionDescriptionInit)
               );
 
               const queued = pendingCandidates.get(fromSocketId) || [];
@@ -438,10 +433,7 @@ export function useVoiceChannel() {
                 try {
                   await pc.addIceCandidate(new RTCIceCandidate(c));
                 } catch (err) {
-                  console.error(
-                    "[webrtc] error adding queued ICE",
-                    err
-                  );
+                  console.error("[webrtc] error adding queued ICE", err);
                 }
               }
               pendingCandidates.delete(fromSocketId);
@@ -474,10 +466,7 @@ export function useVoiceChannel() {
                 queueCandidate(candidateData);
               }
             } catch (err) {
-              console.error(
-                "[webrtc] error adding ice candidate",
-                err
-              );
+              console.error("[webrtc] error adding ice candidate", err);
             }
           }
         }
@@ -497,7 +486,9 @@ export function useVoiceChannel() {
 
   useEffect(() => {
     return () => {
-      console.log("[voice-hook] cleanup on unmount (no socket disconnect here)");
+      console.log(
+        "[voice-hook] cleanup on unmount (no socket disconnect here)"
+      );
       // We deliberately do NOT disconnect the singleton socket here,
       // because other hook instances (or components) in this tab may still use it.
     };
@@ -517,9 +508,7 @@ export function useVoiceChannel() {
       }
 
       if (!socket.connected) {
-        console.log(
-          "[voice-hook] socket not connected, connecting now…"
-        );
+        console.log("[voice-hook] socket not connected, connecting now…");
         socket.connect();
       }
 
@@ -534,10 +523,7 @@ export function useVoiceChannel() {
         // We TRY to get mic, but if it fails we still join as listener-only.
         await ensureLocalStream();
 
-        console.log(
-          "[voice-hook] emitting join-channel",
-          channelId
-        );
+        console.log("[voice-hook] emitting join-channel", channelId);
         socket.emit("join-channel", { channelId });
       } catch (err: any) {
         console.error("Failed to join voice channel", err);
@@ -546,12 +532,7 @@ export function useVoiceChannel() {
         setConnecting(false);
       }
     },
-    [
-      ensureLocalStream,
-      ensureSocket,
-      joinedChannelId,
-      leaveCurrentChannel,
-    ]
+    [ensureLocalStream, ensureSocket, joinedChannelId, leaveCurrentChannel]
   );
 
   const leaveChannel = useCallback(() => {
