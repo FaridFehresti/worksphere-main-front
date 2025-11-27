@@ -10,7 +10,6 @@ type RemoteAudioProps = {
   onLevel?: (level: number) => void;
 };
 
-
 export default function RemoteAudio({
   stream,
   volume = 1,
@@ -25,19 +24,9 @@ export default function RemoteAudio({
     const el = audioRef.current;
     if (!el || !stream) return;
 
-    // Attach the MediaStream
     el.srcObject = stream;
-
-    // These must be set on the *element instance*, not as JSX props
     el.muted = muted;
     el.volume = Math.max(0, Math.min(1, volume ?? 1));
-
-    // Debug:
-    console.log(
-      "[RemoteAudio] setup",
-      { muted: el.muted, volume: el.volume },
-      stream.getTracks().map((t) => ({ kind: t.kind, enabled: t.enabled }))
-    );
 
     const playPromise = el.play();
     if (playPromise && typeof playPromise.then === "function") {
@@ -96,6 +85,13 @@ export default function RemoteAudio({
     };
   }, [stream, onLevel]);
 
-  // NOTE: `controls` left ON for debugging so you can see volume & play state.
-  return <audio ref={audioRef} autoPlay playsInline controls />;
+  // Hidden audio element (no controls)
+  return (
+    <audio
+      ref={audioRef}
+      autoPlay
+      playsInline
+      style={{ display: "none" }}
+    />
+  );
 }

@@ -7,7 +7,7 @@ import { getToken, clearToken } from "./auth-storage";
 
 const rawClient = axios.create({
   baseURL:
-    process.env.NEXT_PUBLIC_API_URL || "http://192.168.1.53:5000",
+    process.env.NEXT_PUBLIC_API_URL || "https://faridtech.org/api",
 });
 
 // Attach token automatically

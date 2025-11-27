@@ -8,9 +8,8 @@ import {
   Typography,
   CircularProgress,
   Avatar,
-  Tooltip,
 } from "@mui/material";
-import { Users2, Server, Hash, Mic2 } from "lucide-react";
+import { Users2, Server as ServerIcon, Hash, Mic2 } from "lucide-react";
 
 import {
   fetchMyTeams,
@@ -32,7 +31,8 @@ import { useUserStore } from "@/lib/store/user";
 
 // 🔊 voice imports
 import { useVoiceChannel } from "@/lib/voice/useVoiceChannel";
-import RemoteAudio from "@/components/voice/RemoteAudio";
+import SpeakingAvatar from "@/components/voice/SpeakingAvatar";
+import { useSearchParams } from "next/navigation";
 
 type Props = {
   teamId: string;
@@ -40,6 +40,10 @@ type Props = {
 
 export default function TeamDetailPanel({ teamId }: Props) {
   const currentUser = useUserStore((s) => s.user);
+
+  const searchParams = useSearchParams();
+  const serverIdFromUrl = searchParams.get("serverId");
+  const channelIdFromUrl = searchParams.get("channelId");
 
   const [team, setTeam] = useState<Team | null>(null);
   const [members, setMembers] = useState<TeamMember[]>([]);
@@ -53,10 +57,6 @@ export default function TeamDetailPanel({ teamId }: Props) {
   const [loadingServers, setLoadingServers] = useState(false);
   const [loadingChannels, setLoadingChannels] = useState(false);
 
-  // 🔊 level meters
-  const [localLevel, setLocalLevel] = useState(0);
-  const [peerLevels, setPeerLevels] = useState<Record<string, number>>({});
-
   // 🔊 voice hook
   const {
     joinedChannelId,
@@ -65,7 +65,6 @@ export default function TeamDetailPanel({ teamId }: Props) {
     error,
     joinChannel,
     leaveChannel,
-    outputVolume,
     localStream,
   } = useVoiceChannel();
 
@@ -135,13 +134,16 @@ export default function TeamDetailPanel({ teamId }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [teamId]);
 
-  /* ------------ PICK FIRST SERVER AUTOMATICALLY ------------ */
+  /* ------------ SYNC SERVER SELECTION WITH URL OR FIRST SERVER ------------ */
 
   useEffect(() => {
-    if (!selectedServerId && servers.length > 0) {
+    if (serverIdFromUrl) {
+      setSelectedServerId(serverIdFromUrl);
+    } else if (!selectedServerId && servers.length > 0) {
       setSelectedServerId(servers[0].id);
     }
-  }, [servers, selectedServerId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [serverIdFromUrl, servers]);
 
   /* ------------ LOAD CHANNELS WHEN SERVER CHANGES ------------ */
 
@@ -154,6 +156,11 @@ export default function TeamDetailPanel({ teamId }: Props) {
 
   const textChannels = channels.filter((c) => c.type === "TEXT");
   const voiceChannels = channels.filter((c) => c.type === "VOICE");
+
+  const selectedChannelFromUrl =
+    channelIdFromUrl && channels.length > 0
+      ? channels.find((c) => c.id === channelIdFromUrl) ?? null
+      : null;
 
   const initialsFromMember = (m: TeamMember) => {
     const name = m.user.name || m.user.email;
@@ -176,6 +183,25 @@ export default function TeamDetailPanel({ teamId }: Props) {
     if (parts.length === 1) return parts[0][0]?.toUpperCase() ?? "?";
     return (parts[0][0] + parts[1][0]).toUpperCase();
   };
+
+  /* ------------ AUTO-JOIN / LEAVE VOICE BASED ON URL ------------ */
+
+  useEffect(() => {
+    if (!selectedChannelFromUrl) return;
+    if (selectedChannelFromUrl.type !== "VOICE") return;
+
+    if (joinedChannelId === selectedChannelFromUrl.id) return;
+
+    // Join the voice channel selected in the URL
+    joinChannel(selectedChannelFromUrl.id);
+  }, [selectedChannelFromUrl, joinChannel, joinedChannelId]);
+
+  useEffect(() => {
+    // If channelId is removed from URL and we're in a voice channel, leave
+    if (!channelIdFromUrl && joinedChannelId) {
+      leaveChannel();
+    }
+  }, [channelIdFromUrl, joinedChannelId, leaveChannel]);
 
   /* ------------ RENDER ------------ */
 
@@ -317,7 +343,7 @@ export default function TeamDetailPanel({ teamId }: Props) {
                       }
                     `}
                   >
-                    <Server className="h-3.5 w-3.5 text-primary-300" />
+                    <ServerIcon className="h-3.5 w-3.5 text-primary-300" />
                     <span>{server.name}</span>
                     <span className="text-[9px] text-graybrand-400 uppercase">
                       {isVoiceServer ? "Voice" : "Text"}
@@ -362,18 +388,32 @@ export default function TeamDetailPanel({ teamId }: Props) {
                   Text Channels
                 </Typography>
                 <Box className="space-y-1 max-h-[160px] overflow-y-auto pr-1">
-                  {textChannels.map((ch) => (
-                    <Box
-                      key={ch.id}
-                      className="
-                        flex items-center gap-2 text-xs text-graybrand-100
-                        rounded-xl px-2 py-1.5 bg-white/5
-                      "
-                    >
-                      <Hash className="h-3 w-3 text-primary-300" />
-                      <span>{ch.name}</span>
-                    </Box>
-                  ))}
+                  {textChannels.map((ch) => {
+                    const isSelected = ch.id === channelIdFromUrl;
+                    return (
+                      <Box
+                        key={ch.id}
+                        className="
+                          flex items-center gap-2 text-xs
+                          rounded-xl px-2 py-1.5
+                        "
+                        style={{
+                          backgroundColor: isSelected
+                            ? "rgba(56,189,248,0.12)"
+                            : "rgba(255,255,255,0.05)",
+                          border: isSelected
+                            ? "1px solid rgba(56,189,248,0.7)"
+                            : "1px solid transparent",
+                          transition:
+                            "background-color 120ms ease, border-color 120ms ease",
+                          color: "#e5e7eb",
+                        }}
+                      >
+                        <Hash className="h-3 w-3 text-primary-300" />
+                        <span>{ch.name}</span>
+                      </Box>
+                    );
+                  })}
                   {!loadingChannels &&
                     selectedServerId &&
                     textChannels.length === 0 && (
@@ -392,15 +432,23 @@ export default function TeamDetailPanel({ teamId }: Props) {
                 <Box className="space-y-2 max-h-[200px] overflow-y-auto pr-1">
                   {voiceChannels.map((ch) => {
                     const joined = joinedChannelId === ch.id;
+                    const isSelected = ch.id === channelIdFromUrl;
                     const channelPeers = joined ? peers : [];
 
                     return (
                       <Box
                         key={ch.id}
-                        className="
-                          rounded-xl bg-white/5 px-2 py-1.5
-                          space-y-1.5
-                        "
+                        className="space-y-1.5 rounded-xl px-2 py-1.5"
+                        style={{
+                          backgroundColor: isSelected
+                            ? "rgba(56,189,248,0.12)"
+                            : "rgba(255,255,255,0.05)",
+                          border: isSelected
+                            ? "1px solid rgba(56,189,248,0.7)"
+                            : "1px solid transparent",
+                          transition:
+                            "background-color 120ms ease, border-color 120ms ease",
+                        }}
                       >
                         {/* Join / leave */}
                         <button
@@ -426,116 +474,28 @@ export default function TeamDetailPanel({ teamId }: Props) {
                         {/* Occupants */}
                         {joined && (
                           <Box className="flex flex-wrap gap-1 pl-1 items-center mt-1">
-{currentUser && (
-  <>
-    <Avatar
-      sx={{
-        width: 22,
-        height: 22,
-        fontSize: 10,
-        bgcolor: "rgba(56,189,248,0.25)",
-        boxShadow:
-          localLevel > 0.15
-            ? "0 0 0 2px rgba(56,189,248,0.8), 0 0 12px rgba(56,189,248,0.9)"
-            : "none",
-      }}
-    >
-      {currentUserInitials()}
-    </Avatar>
-
-    {localStream && (
-  <RemoteAudio
-    stream={localStream}
-    muted
-    volume={0}
-    onLevel={setLocalLevel}
-  />
-)}
-  </>
-)}
-
-{channelPeers.map((peer) =>
-  peer.stream ? (
-    <Tooltip key={peer.socketId} title={peer.userId || peer.socketId}>
-      <span style={{ display: "inline-flex", alignItems: "center" }}>
-        <Avatar
-          sx={{
-            width: 22,
-            height: 22,
-            fontSize: 10,
-            bgcolor: "rgba(56,189,248,0.15)",
-            boxShadow:
-              (peerLevels[peer.socketId] ?? 0) > 0.15
-                ? "0 0 0 2px rgba(56,189,248,0.7), 0 0 10px rgba(56,189,248,0.8)"
-                : "none",
-          }}
-        >
-          {initials(peer.userId || "Peer")}
-        </Avatar>
-        <RemoteAudio
-          stream={peer.stream}
-          muted={false}
-          volume={outputVolume}
-          onLevel={(level) =>
-            setPeerLevels((prev) => ({
-              ...prev,
-              [peer.socketId]: level,
-            }))
-          }
-        />
-      </span>
-    </Tooltip>
-  ) : null
-)}
-
-
-                            {/* Local mic analyser (muted so you don't hear yourself) */}
-                           {localStream && (
-  <RemoteAudio
-    stream={localStream}
-    muted
-    volume={0}
-    onLevel={setLocalLevel}
-  />
-)}
+                            {/* Local user */}
+                            {currentUser && localStream && (
+                              <SpeakingAvatar
+                                stream={localStream}
+                                nameOrEmail={
+                                  currentUser.name || currentUser.email || "You"
+                                }
+                                tooltipLabel="You"
+                              />
+                            )}
 
                             {/* Remote peers */}
-                          {channelPeers.map((peer) => (
-  <Tooltip
-    key={peer.socketId}
-    title={peer.userId || peer.socketId}
-  >
-    <Avatar
-      sx={{
-        width: 22,
-        height: 22,
-        bgcolor: "rgba(56,189,248,0.15)",
-        fontSize: 10,
-        boxShadow:
-          (peerLevels[peer.socketId] ?? 0) > 0.15
-            ? "0 0 0 2px rgba(56,189,248,0.7), 0 0 10px rgba(56,189,248,0.8)"
-            : "none",
-      }}
-    >
-      {initials(peer.userId || "Peer")}
-
-      {peer.stream && (
-        <RemoteAudio
-          stream={peer.stream}
-          muted={false}
-          volume={1}  // 🔥 force full volume for now
-          onLevel={(level) =>
-            setPeerLevels((prev) => ({
-              ...prev,
-              [peer.socketId]: level,
-            }))
-          }
-        />
-      )}
-    </Avatar>
-  </Tooltip>
-))}
-
+                            {channelPeers.map((peer) =>
+                              peer.stream ? (
+                                <SpeakingAvatar
+                                  key={peer.socketId}
+                                  stream={peer.stream}
+                                  nameOrEmail={peer.userId || "Peer"}
+                                  tooltipLabel={peer.userId || peer.socketId}
+                                />
+                              ) : null
+                            )}
 
                             <Typography className="text-[10px] text-graybrand-300 ml-1">
                               {1 + channelPeers.length} in channel

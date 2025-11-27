@@ -2,6 +2,7 @@
 "use client";
 
 import apiClient from "../api-client";
+import { API_ENDPOINT } from "../api-url";
 
 export type Channel = {
   id: string;
@@ -13,7 +14,7 @@ export type Channel = {
 export async function fetchChannelsForServer(
   serverId: string
 ): Promise<Channel[]> {
-  const res = await apiClient.get(`/channels/server/${serverId}`);
+  const res = await apiClient.get(API_ENDPOINT.channels.byServer(serverId));
   return res.data;
 }
 
@@ -22,6 +23,6 @@ export async function createChannel(payload: {
   name: string;
   type: "TEXT" | "VOICE";
 }) {
-  const res = await apiClient.post("/channels", payload);
+  const res = await apiClient.post(API_ENDPOINT.channels.base, payload);
   return res.data;
 }

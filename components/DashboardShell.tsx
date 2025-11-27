@@ -2,7 +2,7 @@
 "use client";
 
 import { Box } from "@mui/material";
-import Sidebar from "./Sidebar";
+import Sidebar from "./dashboard/sidebar/Sidebar";
 
 export default function DashboardShell({ children }: { children: React.ReactNode }) {
   return (

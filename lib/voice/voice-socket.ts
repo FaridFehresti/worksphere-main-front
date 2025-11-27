@@ -10,7 +10,7 @@ export function getVoiceSocket(): Socket {
   if (socket) return socket;
 
   const baseURL =
-    process.env.NEXT_PUBLIC_API_URL || "http://192.168.1.53:5000";
+    process.env.NEXT_PUBLIC_API_URL || "https://faridtech.org";
 
   console.log("[voice-socket] creating socket for", `${baseURL}/voice`);
 

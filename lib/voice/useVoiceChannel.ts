@@ -81,28 +81,28 @@ export function useVoiceChannel() {
    * Try to get local mic, but if it fails we just log and continue.
    * This allows LISTENER-ONLY users (no mic / no permissions).
    */
-  const ensureLocalStream = useCallback(async () => {
-    if (myStream) return;
+ // inside useVoiceChannel.ts
+const [localStream, setLocalStream] = useState<MediaStream | null>(null);
 
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      console.warn("[voice-hook] getUserMedia not available");
-      return;
-    }
+const ensureLocalStream = async () => {
+  if (localStream) return localStream;
 
-    try {
-      console.log("[voice-hook] ensureLocalStream: trying to acquire mic");
-      const constraints: MediaStreamConstraints = {
-        audio: inputDeviceId ? { deviceId: { exact: inputDeviceId } } : true,
-        video: false,
-      };
-      const stream = await navigator.mediaDevices.getUserMedia(constraints);
-      myStream = stream;
-      console.log("[voice-hook] ensureLocalStream: got local media stream");
-    } catch (err) {
-      console.warn("[voice-hook] ensureLocalStream: failed to get mic", err);
-      // NOTE: do NOT throw. We allow recv-only behavior.
-    }
-  }, [inputDeviceId]);
+  console.log("[voice-hook] ensureLocalStream: trying to acquire mic");
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    console.log("[voice-hook] ensureLocalStream: got local media stream");
+    setLocalStream(stream);
+    return stream;
+  } catch (err) {
+    console.warn("[voice-hook] ensureLocalStream: failed to get mic", err);
+    // don't throw – we can still join as listener
+    return null;
+  }
+};
+
+
+
+
 
   /* ------------ helpers: peers / PCs ------------ */
 
@@ -496,44 +496,23 @@ export function useVoiceChannel() {
 
   /* ------------ public API ------------ */
 
-  const joinChannel = useCallback(
-    async (channelId: string) => {
-      console.log("[voice-hook] joinChannel called", channelId);
-      if (!channelId) return;
+  const joinChannel = async (channelId: string) => {
+  console.log("[voice-hook] joinChannel called", channelId);
+  const s = await ensureSocket(); // your existing socket init
+  if (!s) return;
 
-      const socket = ensureSocket();
-      if (!socket) {
-        setError("No voice socket available");
-        return;
-      }
+  setError(null);
+  setConnecting(true);
 
-      if (!socket.connected) {
-        console.log("[voice-hook] socket not connected, connecting now…");
-        socket.connect();
-      }
+  // will silently fail if mic denied – that’s fine
+  await ensureLocalStream();
 
-      if (joinedChannelId && joinedChannelId !== channelId) {
-        leaveCurrentChannel();
-      }
+  console.log("[voice-hook] emitting join-channel", channelId);
+  s.emit("join-channel", { channelId });
 
-      try {
-        setConnecting(true);
-        setError(null);
-
-        // We TRY to get mic, but if it fails we still join as listener-only.
-        await ensureLocalStream();
-
-        console.log("[voice-hook] emitting join-channel", channelId);
-        socket.emit("join-channel", { channelId });
-      } catch (err: any) {
-        console.error("Failed to join voice channel", err);
-        setError(err?.message ?? "Failed to join voice channel");
-      } finally {
-        setConnecting(false);
-      }
-    },
-    [ensureLocalStream, ensureSocket, joinedChannelId, leaveCurrentChannel]
-  );
+  setJoinedChannelId(channelId);
+  setConnecting(false);
+};
 
   const leaveChannel = useCallback(() => {
     console.log("[voice-hook] leaveChannel called");
