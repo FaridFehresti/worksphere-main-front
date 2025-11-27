@@ -39,6 +39,14 @@ const authTextFieldBaseProps: Partial<TextFieldProps> = {
   },
 };
 
+// 🔧 API response types
+type LoginResponse = {
+  token: string;
+};
+
+// If you have a stronger User type, you can replace `any` here.
+type MeResponse = any;
+
 function LoginContent() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -56,16 +64,19 @@ function LoginContent() {
 
     try {
       // 1. Login
-      const res = await apiClient.post(API_ENDPOINT.auth.login, {
-        email,
-        password,
-      });
+      const res = await apiClient.post<LoginResponse>(
+        API_ENDPOINT.auth.login,
+        {
+          email,
+          password,
+        }
+      );
 
       const token = res.data.token;
       setToken(token);
 
       // 2. Get full user profile
-      const me = await apiClient.get(API_ENDPOINT.auth.me);
+      const me = await apiClient.get<MeResponse>(API_ENDPOINT.auth.me);
 
       // 3. Save in store
       useUserStore.getState().setUser(me.data);

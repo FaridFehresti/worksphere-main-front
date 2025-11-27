@@ -3,8 +3,6 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
-import api from "@/lib/api-client";
-import { setToken } from "@/lib/auth-storage";
 import {
   Button,
   Card,
@@ -14,9 +12,19 @@ import {
 } from "@mui/material";
 import type { TextFieldProps } from "@mui/material/TextField";
 import { Sparkles, UserPlus2, ShieldCheck } from "lucide-react";
+
 import apiClient from "@/lib/api-client";
+import { setToken } from "@/lib/auth-storage";
 import { API_ENDPOINT } from "@/lib/api-url";
 import { useUserStore } from "@/lib/store/user";
+
+// 🔧 API response types
+type RegisterResponse = {
+  token: string;
+};
+
+// If you have a concrete User type, replace `any`.
+type MeResponse = any;
 
 // 🔧 Same input theme as login
 const authTextFieldBaseProps: Partial<TextFieldProps> = {
@@ -50,41 +58,45 @@ export default function RegisterPage() {
   const router = useRouter();
 
   const handleSubmit = async (e: React.FormEvent) => {
-  e.preventDefault();
-  setLoading(true);
-  setError(null);
+    e.preventDefault();
+    setLoading(true);
+    setError(null);
 
-  if (password.length < 6) {
-    setError("Password must be at least 6 characters.");
-    setLoading(false);
-    return;
-  }
+    if (password.length < 6) {
+      setError("Password must be at least 6 characters.");
+      setLoading(false);
+      return;
+    }
 
-  try {
-    // 1. Register
-    const res = await apiClient.post(API_ENDPOINT.auth.register, {
-      email,
-      name,
-      password,
-    });
+    try {
+      // 1. Register
+      const res = await apiClient.post<RegisterResponse>(
+        API_ENDPOINT.auth.register,
+        {
+          email,
+          name,
+          password,
+        }
+      );
 
-    const token = res.data.token;
-    setToken(token);
+      const token = res.data.token;
+      setToken(token);
 
-    // 2. Fetch user
-    const me = await apiClient.get(API_ENDPOINT.auth.me);
+      // 2. Fetch user
+      const me = await apiClient.get<MeResponse>(API_ENDPOINT.auth.me);
 
-    // 3. Save in store
-    useUserStore.getState().setUser(me.data);
+      // 3. Save in store
+      useUserStore.getState().setUser(me.data);
 
-    router.push("/");
-  } catch {
-    setError("Registration failed. Please check your details and try again.");
-  } finally {
-    setLoading(false);
-  }
-};
-
+      router.push("/");
+    } catch {
+      setError(
+        "Registration failed. Please check your details and try again."
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
     <main
@@ -179,7 +191,7 @@ export default function RegisterPage() {
                     label="Full name"
                     value={name}
                     onChange={(e) => setName(e.target.value)}
-                    sx={{ marginBottom: "16px" }} // same trick as login to get slightly larger gap on first field
+                    sx={{ marginBottom: "16px" }}
                   />
 
                   <TextField
@@ -206,7 +218,7 @@ export default function RegisterPage() {
                   />
                 </div>
 
-                {/* Meta row – visually similar weight to login meta row */}
+                {/* Meta row */}
                 <div className="flex items-center justify-between text-[12px] text-graybrand-200">
                   <span>Use your work email to sign up.</span>
                   <span className="text-graybrand-300">
@@ -234,7 +246,7 @@ export default function RegisterPage() {
                 </Button>
               </form>
 
-              {/* Footer – same size/weight as login footer */}
+              {/* Footer */}
               <Typography className="text-[12px] text-graybrand-100 text-center">
                 Already have an account?{" "}
                 <a
@@ -248,7 +260,7 @@ export default function RegisterPage() {
           </Card>
         </motion.div>
 
-        {/* RIGHT: Story / benefits (kept as is, just spacing aligned with login) */}
+        {/* RIGHT: Story / benefits */}
         <motion.div
           initial={{ opacity: 0, x: 32 }}
           animate={{ opacity: 1, x: 0 }}
