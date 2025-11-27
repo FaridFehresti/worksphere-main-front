@@ -1,5 +1,5 @@
 const BASE_URL: string =
-  process.env.NEXT_APP_BASE_URL || "http://192.168.1.53:5000";
+  process.env.NEXT_APP_BASE_URL || "https://faridtech.org/api";
 
 export const API_ENDPOINT = {
   auth: {
