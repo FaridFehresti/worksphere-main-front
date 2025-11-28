@@ -85,32 +85,64 @@ export function useVoiceChannel() {
    * This allows LISTENER-ONLY users (no mic / no permissions).
    */
   const ensureLocalStream = useCallback(
-    async () => {
-      if (localStream) return localStream;
+  async () => {
+    if (localStream) return localStream;
 
-      console.log("[voice-hook] ensureLocalStream: trying to acquire mic");
-      try {
-        const constraints: MediaStreamConstraints = {
-          audio: inputDeviceId
-            ? { deviceId: { exact: inputDeviceId } }
-            : true,
-        };
+    console.log("[voice-hook] ensureLocalStream: trying to acquire mic");
 
-        const stream = await navigator.mediaDevices.getUserMedia(constraints);
-        console.log("[voice-hook] ensureLocalStream: got local media stream");
+    const buildConstraints = (deviceId?: string | null): MediaStreamConstraints => ({
+      audio: deviceId ? { deviceId: { exact: deviceId } } : true,
+    });
 
-        myStream = stream;
-        setLocalStream(stream);
+    try {
+      // First try the selected device
+      const stream = await navigator.mediaDevices.getUserMedia(
+        buildConstraints(inputDeviceId ?? null),
+      );
+      console.log("[voice-hook] ensureLocalStream: got local media stream");
 
-        return stream;
-      } catch (err) {
-        console.warn("[voice-hook] ensureLocalStream: failed to get mic", err);
-        // don't throw – we can still join as listener
-        return null;
+      myStream = stream;
+      setLocalStream(stream);
+      return stream;
+    } catch (err: any) {
+      console.warn(
+        "[voice-hook] ensureLocalStream: failed with selected device, err=",
+        err?.name,
+        err,
+      );
+
+      // If it's a constraint/device issue, try again with default device
+      if (
+        err?.name === "OverconstrainedError" ||
+        err?.name === "NotFoundError"
+      ) {
+        try {
+          console.log(
+            "[voice-hook] retrying getUserMedia with default device",
+          );
+          const fallbackStream = await navigator.mediaDevices.getUserMedia(
+            buildConstraints(null),
+          );
+          console.log(
+            "[voice-hook] ensureLocalStream: got local media stream with fallback device",
+          );
+          myStream = fallbackStream;
+          setLocalStream(fallbackStream);
+          return fallbackStream;
+        } catch (fallbackErr) {
+          console.warn(
+            "[voice-hook] fallback getUserMedia failed, joining as listener only",
+            fallbackErr,
+          );
+        }
       }
-    },
-    [inputDeviceId, localStream],
-  );
+
+      // Listener-only mode
+      return null;
+    }
+  },
+  [inputDeviceId, localStream],
+);
 
   /* ------------ helpers: peers / PCs ------------ */
 

@@ -475,27 +475,27 @@ export default function TeamDetailPanel({ teamId }: Props) {
                         {joined && (
                           <Box className="flex flex-wrap gap-1 pl-1 items-center mt-1">
                             {/* Local user */}
-                            {currentUser && localStream && (
-                              <SpeakingAvatar
-                                stream={localStream}
-                                nameOrEmail={
-                                  currentUser.name || currentUser.email || "You"
-                                }
-                                tooltipLabel="You"
-                              />
-                            )}
+{currentUser && localStream && (
+  <SpeakingAvatar
+    stream={localStream}
+    nameOrEmail={currentUser.name || currentUser.email || "You"}
+    tooltipLabel="You"
+    playAudio={false}       // 👈 DO NOT play your own mic
+  />
+)}
 
-                            {/* Remote peers */}
-                            {channelPeers.map((peer) =>
-                              peer.stream ? (
-                                <SpeakingAvatar
-                                  key={peer.socketId}
-                                  stream={peer.stream}
-                                  nameOrEmail={peer.userId || "Peer"}
-                                  tooltipLabel={peer.userId || peer.socketId}
-                                />
-                              ) : null
-                            )}
+{channelPeers.map((peer) =>
+  peer.stream ? (
+    <SpeakingAvatar
+      key={peer.socketId}
+      stream={peer.stream}
+      nameOrEmail={peer.userId || "Peer"}
+      tooltipLabel={peer.userId || peer.socketId}
+      playAudio={true}      // 👈 Explicit for clarity (default anyway)
+      // volume={outputVolume} // optional: from useVoiceChannel
+    />
+  ) : null
+)}
 
                             <Typography className="text-[10px] text-graybrand-300 ml-1">
                               {1 + channelPeers.length} in channel

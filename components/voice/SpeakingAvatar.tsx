@@ -11,6 +11,8 @@ type SpeakingAvatarProps = {
   nameOrEmail: string;
   tooltipLabel?: string;
   size?: number;
+  /** If false, avatar still shows speaking ring but does NOT play audio */
+  playAudio?: boolean;
 };
 
 const getInitials = (nameOrEmail: string) => {
@@ -27,9 +29,10 @@ export default function SpeakingAvatar({
   nameOrEmail,
   tooltipLabel,
   size = 22,
+  playAudio = true,   // 👈 default: play audio (for remote peers)
 }: SpeakingAvatarProps) {
   const level = useAudioLevel(stream);
-  const isSpeaking = level > 0.06; // tweak threshold if needed
+  const isSpeaking = level > 0.06;
 
   const initials = getInitials(nameOrEmail);
   const label = tooltipLabel ?? nameOrEmail;
@@ -60,8 +63,8 @@ export default function SpeakingAvatar({
           {initials}
         </Avatar>
 
-        {/* Hidden audio element that actually plays the sound */}
-        <RemoteAudio stream={stream} volume={volume} />
+        {/* 👇 Only play the audio if playAudio is true */}
+        {playAudio && <RemoteAudio stream={stream} volume={volume} />}
       </Box>
     </Tooltip>
   );
