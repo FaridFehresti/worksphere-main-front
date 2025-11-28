@@ -8,8 +8,6 @@ import { usePathname, useRouter } from "next/navigation";
 import { useUserStore } from "@/lib/store/user";
 import { useLogout } from "@/lib/logout";
 
-
-
 import { fetchMyTeams, Team } from "@/lib/api/teams";
 import {
   fetchServersForTeam,
@@ -19,14 +17,13 @@ import {
   fetchChannelsForServer,
   Channel,
 } from "@/lib/api/channels";
+
 import TeamRail from "./TeamRail";
 import TeamServersPanel from "./TeamServersPanel";
 import UserStatusBar from "../UserStatusBar";
 import CreateTeamDialog from "../CreateTeamDialog";
 import AddMemberDialog from "../AddMemberDialog";
 import CreateServerDialog from "../CreateServerDialog";
-
-
 
 export default function Sidebar() {
   const user = useUserStore((s) => s.user);
@@ -156,12 +153,10 @@ export default function Sidebar() {
   };
 
   const handleServerClick = (server: ServerType) => {
-    // Keep it simple: just focus that server, no extra route change here
     router.push(`/dashboard/teams/${server.teamId}?serverId=${server.id}`);
   };
 
   const handleChannelClick = (server: ServerType, channel: Channel) => {
-    // This drives TeamDetailPanel: it will load this server + channel
     router.push(
       `/dashboard/teams/${server.teamId}?serverId=${server.id}&channelId=${channel.id}`
     );

@@ -38,7 +38,6 @@ export default function RemoteAudio({
 
     // Only reset srcObject if it actually changed
     if (el.srcObject !== stream) {
-      // Stop any current playback first to avoid AbortError
       el.pause();
       (el as any).srcObject = stream;
     }
@@ -47,7 +46,6 @@ export default function RemoteAudio({
       const p = el.play();
       if (p && typeof p.then === "function") {
         p.catch((err: any) => {
-          // AbortError = new load() while play in-flight; ignore
           if (err?.name === "AbortError") {
             console.warn("[RemoteAudio] play aborted (new load), will retry");
             return;
@@ -57,26 +55,23 @@ export default function RemoteAudio({
       }
     };
 
-    // If element is already ready, try immediately, otherwise wait for canplay
     const onCanPlay = () => {
       tryPlay();
     };
 
     el.addEventListener("canplay", onCanPlay);
 
-    // In case the stream is already ready:
     if (el.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
       tryPlay();
     }
 
     return () => {
       el.removeEventListener("canplay", onCanPlay);
-      // Don't clear srcObject here; just pause
       el.pause();
     };
   }, [stream, muted, volume]);
 
-  // Optional simple level meter (if you ever use onLevel)
+  // Optional simple level meter
   useEffect(() => {
     if (!onLevel || !stream) return;
 
@@ -118,13 +113,13 @@ export default function RemoteAudio({
     };
   }, [stream, onLevel]);
 
+  // 👇 Hidden audio element (still plays, not visible)
   return (
-     <audio
-    ref={audioRef}
-    controls   // 👈 add
-    autoPlay
-    playsInline
-    style={{ width: 200 }}
-  />
+    <audio
+      ref={audioRef}
+      autoPlay
+      playsInline
+      style={{ display: "none" }}
+    />
   );
 }

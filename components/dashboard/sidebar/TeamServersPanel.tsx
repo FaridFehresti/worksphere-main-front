@@ -7,6 +7,7 @@ import {
   Skeleton,
   IconButton,
   Tooltip,
+  Avatar,
 } from "@mui/material";
 import {
   Server as ServerIcon,
@@ -15,9 +16,15 @@ import {
   Users2,
   Plus,
 } from "lucide-react";
+
 import { Team } from "@/lib/api/teams";
 import { Server as ServerType } from "@/lib/api/servers";
 import { Channel } from "@/lib/api/channels";
+
+// 🔊 voice + user
+import { useVoiceChannel } from "@/lib/voice/useVoiceChannel";
+import SpeakingAvatar from "@/components/voice/SpeakingAvatar";
+import { useUserStore } from "@/lib/store/user";
 
 type Props = {
   teams: Team[];
@@ -30,6 +37,15 @@ type Props = {
   onChannelClick: (server: ServerType, channel: Channel) => void;
   onCreateServerClick: () => void;
   onOpenAddMember?: (team: Team) => void;
+};
+
+const initialsFromId = (value?: string) => {
+  if (!value) return "?";
+  const clean = value.trim();
+  if (!clean) return "?";
+  const parts = clean.split(" ");
+  if (parts.length === 1) return clean.slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[1][0]).toUpperCase();
 };
 
 export default function TeamServersPanel({
@@ -45,6 +61,17 @@ export default function TeamServersPanel({
   onOpenAddMember,
 }: Props) {
   const activeTeam = teams.find((t) => t.id === activeTeamId) || null;
+
+  // 🔊 voice state (global-ish)
+  const { joinedChannelId, peers, localStream } = useVoiceChannel();
+  const currentUser = useUserStore((s) => s.user);
+
+  // Debug if needed:
+  // console.log("[TeamServersPanel VC]", {
+  //   joinedChannelId,
+  //   peersLen: peers.length,
+  //   hasLocal: !!localStream,
+  // });
 
   const serverSkeletons = Array.from({ length: 2 });
   const channelSkeletons = Array.from({ length: 3 });
@@ -409,13 +436,21 @@ export default function TeamServersPanel({
                         {!showChannelSkeletons &&
                           serverChannels.map((channel) => {
                             const isVoice = channel.type === "VOICE";
+                            const isJoined =
+                              isVoice && joinedChannelId === channel.id;
+                            const channelPeers = isJoined ? peers : [];
+
+                            // ✅ Always count you when joined
+                            const occupantCount = isJoined
+                              ? 1 + channelPeers.length
+                              : channelPeers.length;
+
                             return (
                               <Box
                                 key={channel.id}
                                 sx={{
                                   display: "flex",
-                                  alignItems: "center",
-                                  justifyContent: "space-between",
+                                  flexDirection: "column",
                                   fontSize: "11px",
                                   padding: "3px 6px",
                                   borderRadius: "6px",
@@ -427,34 +462,133 @@ export default function TeamServersPanel({
                                     backgroundColor:
                                       "rgba(15,23,42,0.9)",
                                   },
+                                  backgroundColor: isJoined
+                                    ? "rgba(15,23,42,0.95)"
+                                    : undefined,
                                 }}
                                 onClick={() =>
                                   onChannelClick(server, channel)
                                 }
                               >
-                                <span
-                                  style={{
-                                    display: "inline-flex",
+                                {/* Channel row */}
+                                <Box
+                                  sx={{
+                                    display: "flex",
                                     alignItems: "center",
-                                    gap: "6px",
+                                    justifyContent: "space-between",
                                   }}
                                 >
-                                  {isVoice ? (
-                                    <Volume2 className="h-3.5 w-3.5 text-[color:var(--color-primary-300)]" />
-                                  ) : (
-                                    <Hash className="h-3.5 w-3.5 text-[color:var(--color-primary-300)]" />
-                                  )}
-                                  <span>{channel.name}</span>
-                                </span>
-                                <span
-                                  style={{
-                                    textTransform: "uppercase",
-                                    fontSize: "9px",
-                                    color: "var(--color-gray-600)",
-                                  }}
-                                >
-                                  {channel.type.toLowerCase()}
-                                </span>
+                                  <span
+                                    style={{
+                                      display: "inline-flex",
+                                      alignItems: "center",
+                                      gap: "6px",
+                                    }}
+                                  >
+                                    {isVoice ? (
+                                      <Volume2 className="h-3.5 w-3.5 text-[color:var(--color-primary-300)]" />
+                                    ) : (
+                                      <Hash className="h-3.5 w-3.5 text-[color:var(--color-primary-300)]" />
+                                    )}
+                                    <span>{channel.name}</span>
+                                  </span>
+                                  <span
+                                    style={{
+                                      textTransform: "uppercase",
+                                      fontSize: "9px",
+                                      color: "var(--color-gray-600)",
+                                    }}
+                                  >
+                                    {channel.type.toLowerCase()}
+                                  </span>
+                                </Box>
+
+                                {/* Occupants nested under joined voice channel */}
+                                {isVoice && isJoined && (
+                                  <Box
+                                    sx={{
+                                      marginTop: "4px",
+                                      paddingLeft: "18px",
+                                      display: "flex",
+                                      flexDirection: "column",
+                                      gap: "3px",
+                                    }}
+                                  >
+                                    <Box
+                                      sx={{
+                                        display: "flex",
+                                        flexWrap: "wrap",
+                                        alignItems: "center",
+                                        gap: "4px",
+                                      }}
+                                    >
+                                      {/* Local user (no playback) */}
+                                      {currentUser && localStream && (
+                                        <SpeakingAvatar
+                                          stream={localStream}
+                                          nameOrEmail={
+                                            currentUser.name ||
+                                            currentUser.email ||
+                                            "You"
+                                          }
+                                          tooltipLabel="You"
+                                          playAudio={false}
+                                        />
+                                      )}
+
+                                      {/* Remote peers */}
+                                      {channelPeers.map((peer) => {
+                                        const label =
+                                          peer.userId || peer.socketId;
+
+                                        // If they have a stream -> full SpeakingAvatar
+                                        if (peer.stream) {
+                                          return (
+                                            <SpeakingAvatar
+                                              key={peer.socketId}
+                                              stream={peer.stream}
+                                              nameOrEmail={
+                                                peer.userId || "Peer"
+                                              }
+                                              tooltipLabel={label}
+                                              playAudio={true}
+                                            />
+                                          );
+                                        }
+
+                                        // If no stream yet (listener-only / negotiating),
+                                        // show a fallback avatar so count matches visuals
+                                        return (
+                                          <Avatar
+                                            key={peer.socketId}
+                                            sx={{
+                                              width: 22,
+                                              height: 22,
+                                              bgcolor:
+                                                "rgba(148,163,184,0.25)",
+                                              fontSize: 10,
+                                            }}
+                                            title={label}
+                                          >
+                                            {initialsFromId(label)}
+                                          </Avatar>
+                                        );
+                                      })}
+
+                                      <Typography
+                                        sx={{
+                                          fontSize: "10px",
+                                          color:
+                                            "var(--color-gray-400)",
+                                          marginLeft: "4px",
+                                          whiteSpace: "nowrap",
+                                        }}
+                                      >
+                                        {occupantCount} in channel
+                                      </Typography>
+                                    </Box>
+                                  </Box>
+                                )}
                               </Box>
                             );
                           })}

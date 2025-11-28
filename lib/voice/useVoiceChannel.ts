@@ -55,6 +55,34 @@ export type VoicePeer = {
 };
 
 /* ------------------------------------------------------------------ */
+/*  GLOBAL VOICE STATE (shared across all components)                 */
+/* ------------------------------------------------------------------ */
+
+type VoiceState = {
+  joinedChannelId: string | null;
+  peers: Record<string, VoicePeer>;
+  connecting: boolean;
+  error: string | null;
+  localStream: MediaStream | null;
+};
+
+let voiceState: VoiceState = {
+  joinedChannelId: null,
+  peers: {},
+  connecting: false,
+  error: null,
+  localStream: null,
+};
+
+type Subscriber = (state: VoiceState) => void;
+const subscribers = new Set<Subscriber>();
+
+function notify(updater: (prev: VoiceState) => VoiceState) {
+  voiceState = updater(voiceState);
+  subscribers.forEach((fn) => fn(voiceState));
+}
+
+/* ------------------------------------------------------------------ */
 /*  Hook                                                              */
 /* ------------------------------------------------------------------ */
 
@@ -63,11 +91,18 @@ export function useVoiceChannel() {
 
   const { inputDeviceId, outputVolume } = useAudioStore();
 
-  const [joinedChannelId, setJoinedChannelId] = useState<string | null>(null);
-  const [peers, setPeers] = useState<Record<string, VoicePeer>>({});
-  const [connecting, setConnecting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [localStream, setLocalStream] = useState<MediaStream | null>(null);
+  // Local React state mirrors the global voiceState
+  const [state, setState] = useState<VoiceState>(voiceState);
+
+  // Subscribe this component to global voiceState
+  useEffect(() => {
+    subscribers.add(setState);
+    setState(voiceState); // sync immediately
+
+    return () => {
+      subscribers.delete(setState);
+    };
+  }, []);
 
   /* ------------ helpers: local media ------------ */
 
@@ -77,53 +112,52 @@ export function useVoiceChannel() {
       myStream.getTracks().forEach((t) => t.stop());
       myStream = null;
     }
-    setLocalStream(null);
+
+    notify((prev) => ({
+      ...prev,
+      localStream: null,
+    }));
   }, []);
 
-  /**
-   * Try to get local mic, but if it fails we just log and continue.
-   * This allows LISTENER-ONLY users (no mic / no permissions).
-   */
   const ensureLocalStream = useCallback(async () => {
-  if (localStream) return localStream;
+    if (voiceState.localStream) return voiceState.localStream;
 
-  console.log("[voice-hook] ensureLocalStream: trying to acquire mic");
+    console.log("[voice-hook] ensureLocalStream: trying to acquire mic");
 
-  try {
-    if (inputDeviceId) {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          audio: { deviceId: { exact: inputDeviceId } },
-        });
-        console.log("[voice-hook] ensureLocalStream: got stream with selected device");
-        myStream = stream;
-        setLocalStream(stream);
-        return stream;
-      } catch (err) {
-        console.warn(
-          "[voice-hook] ensureLocalStream: failed with selected device, err=",
-          err,
-        );
-        // clear invalid deviceId so next time you don't keep failing
-        // useAudioStore.getState().setInputDeviceId(null); // if you have such action
+    try {
+      if (inputDeviceId) {
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({
+            audio: { deviceId: { exact: inputDeviceId } },
+          });
+          console.log(
+            "[voice-hook] ensureLocalStream: got stream with selected device",
+          );
+          myStream = stream;
+          notify((prev) => ({ ...prev, localStream: stream }));
+          return stream;
+        } catch (err) {
+          console.warn(
+            "[voice-hook] ensureLocalStream: failed with selected device, err=",
+            err,
+          );
+        }
       }
+
+      console.log("[voice-hook] retrying getUserMedia with default device");
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      console.log("[voice-hook] ensureLocalStream: got fallback stream");
+      myStream = stream;
+      notify((prev) => ({ ...prev, localStream: stream }));
+      return stream;
+    } catch (err) {
+      console.warn(
+        "[voice-hook] fallback getUserMedia failed, joining as listener only",
+        err,
+      );
+      return null;
     }
-
-    console.log("[voice-hook] retrying getUserMedia with default device");
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    console.log("[voice-hook] ensureLocalStream: got fallback stream");
-    myStream = stream;
-    setLocalStream(stream);
-    return stream;
-  } catch (err) {
-    console.warn(
-      "[voice-hook] fallback getUserMedia failed, joining as listener only",
-      err,
-    );
-    return null;
-  }
-}, [inputDeviceId, localStream]);
-
+  }, [inputDeviceId]);
 
   /* ------------ helpers: peers / PCs ------------ */
 
@@ -141,19 +175,19 @@ export function useVoiceChannel() {
       peerConnections.delete(socketId);
     }
 
-    setPeers((prev) => {
-      const copy = { ...prev };
-      delete copy[socketId];
-      return copy;
+    notify((prev) => {
+      const nextPeers = { ...prev.peers };
+      delete nextPeers[socketId];
+      return { ...prev, peers: nextPeers };
     });
   }, []);
 
   const leaveCurrentChannel = useCallback(() => {
     const socket = socketSingleton;
-    console.log("[voice-hook] leaveCurrentChannel", joinedChannelId);
+    console.log("[voice-hook] leaveCurrentChannel", voiceState.joinedChannelId);
 
-    if (socket && joinedChannelId) {
-      socket.emit("leave-channel", { channelId: joinedChannelId });
+    if (socket && voiceState.joinedChannelId) {
+      socket.emit("leave-channel", { channelId: voiceState.joinedChannelId });
     }
 
     for (const peerId of peerConnections.keys()) {
@@ -162,17 +196,15 @@ export function useVoiceChannel() {
     peerConnections.clear();
     pendingCandidates.clear();
     stopLocalStream();
-    setJoinedChannelId(null);
-    setPeers({});
-  }, [cleanupPeer, joinedChannelId, stopLocalStream]);
 
-  /**
-   * Create RTCPeerConnection for a peer.
-   *
-   * - If we have a local stream, we add its tracks.
-   * - If we do NOT have a local stream but we're the INITIATOR:
-   *   we add a recvonly transceiver so we can still receive audio.
-   */
+    notify((prev) => ({
+      ...prev,
+      joinedChannelId: null,
+      peers: {},
+      connecting: false,
+    }));
+  }, [cleanupPeer, stopLocalStream]);
+
   const createPeerConnection = useCallback(
     async (peerSocketId: string, isInitiator: boolean) => {
       const socket = socketSingleton;
@@ -181,7 +213,6 @@ export function useVoiceChannel() {
         return;
       }
 
-      // Try to get local media but allow failure (listener-only).
       await ensureLocalStream();
 
       console.log(
@@ -192,33 +223,31 @@ export function useVoiceChannel() {
       );
 
       const pc = new RTCPeerConnection({
-  iceServers: [
-    {
-      urls: "stun:91.212.174.166:3478",
-    },
-    {
-      urls: "turn:91.212.174.166:3478?transport=udp",
-      username: "turnuser",
-      credential: "turnpassword",
-    },
-  ],
-});
-pc.oniceconnectionstatechange = () => {
-  console.log(
-    "[webrtc] iceConnectionState for",
-    peerSocketId,
-    "=>",
-    pc.iceConnectionState
-  );
-};
-      // If we have a local stream -> add tracks (we are sending audio).
+        iceServers: [
+          {
+            urls: "stun:91.212.174.166:3478",
+          },
+          {
+            urls: "turn:91.212.174.166:3478?transport=udp",
+            username: "turnuser",
+            credential: "turnpassword",
+          },
+        ],
+      });
+      pc.oniceconnectionstatechange = () => {
+        console.log(
+          "[webrtc] iceConnectionState for",
+          peerSocketId,
+          "=>",
+          pc.iceConnectionState,
+        );
+      };
+
       if (myStream) {
         myStream.getTracks().forEach((track) => {
           pc.addTrack(track, myStream!);
         });
       } else if (isInitiator) {
-        // No local stream, but we are the offerer:
-        // explicitly say "I want to RECEIVE audio" (recvonly).
         console.log(
           "[voice-hook] no local stream, adding recvonly audio transceiver",
         );
@@ -241,23 +270,28 @@ pc.oniceconnectionstatechange = () => {
 
         console.log("[voice-hook] got remote track for", peerSocketId);
 
-        setPeers((prev) => ({
+        notify((prev) => ({
           ...prev,
-          [peerSocketId]: {
-            ...(prev[peerSocketId] ?? { socketId: peerSocketId }),
-            stream: remoteStream,
+          peers: {
+            ...prev.peers,
+            [peerSocketId]: {
+              ...(prev.peers[peerSocketId] ?? { socketId: peerSocketId }),
+              stream: remoteStream,
+            },
           },
         }));
       };
 
       peerConnections.set(peerSocketId, pc);
 
-      setPeers((prev) => ({
+      notify((prev) => ({
         ...prev,
-        [peerSocketId]: prev[peerSocketId] ?? { socketId: peerSocketId },
+        peers: {
+          ...prev.peers,
+          [peerSocketId]: prev.peers[peerSocketId] ?? { socketId: peerSocketId },
+        },
       }));
 
-      // If we are initiator -> we create and send an offer.
       if (isInitiator) {
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
@@ -279,15 +313,13 @@ pc.oniceconnectionstatechange = () => {
   const ensureSocket = useCallback((): Socket | null => {
     if (typeof window === "undefined") return null;
 
-    // shared socket instance
     if (!socketSingleton) {
       console.log("[voice-hook] creating voice socket");
-      socketSingleton = getVoiceSocket(); // <-- auth + transports configured there
+      socketSingleton = getVoiceSocket();
     }
 
     const socket = socketSingleton;
 
-    // 🔄 Refresh auth in case token changed since socket creation
     const token = getToken();
     if (token) {
       (socket as any).auth = { token };
@@ -295,13 +327,12 @@ pc.oniceconnectionstatechange = () => {
       console.warn("[voice-hook] no token in ensureSocket");
     }
 
-    // Connect if not already connected
     if (!socket.connected) {
       console.log("[voice-hook] connecting voice socket");
       socket.connect();
     }
 
-    // Attach listeners only once per tab
+    // Attach listeners only once – they update GLOBAL voiceState
     if (!listenersAttached) {
       listenersAttached = true;
 
@@ -315,16 +346,23 @@ pc.oniceconnectionstatechange = () => {
 
       socket.on("connect_error", (err) => {
         console.error("[voice] connect_error", err);
-        // don't spam state resets if unmounted
-        setError(err.message || "Voice connection failed");
+        notify((prev) => ({
+          ...prev,
+          error: err.message || "Voice connection failed",
+          connecting: false,
+        }));
       });
 
       socket.on("channel-joined", async (event: ChannelJoinedEvent) => {
         console.log("[voice] channel-joined", event);
 
-        setJoinedChannelId(event.channelId);
+        notify((prev) => ({
+          ...prev,
+          joinedChannelId: event.channelId,
+          connecting: false,
+          error: null,
+        }));
 
-        // For each existing peer: we are the INITIATOR
         for (const peerId of event.existingPeers) {
           await createPeerConnection(peerId, true);
         }
@@ -335,20 +373,21 @@ pc.oniceconnectionstatechange = () => {
 
         const { channelId, socketId, userId } = event;
 
-        // avoid stale channel events
-        if (!joinedChannelId || joinedChannelId !== channelId) {
-          // we could ignore or still accept; for now, ignore if channel doesn't match
+        if (!voiceState.joinedChannelId || voiceState.joinedChannelId !== channelId) {
+          return;
         }
 
-        setPeers((prev) => ({
+        notify((prev) => ({
           ...prev,
-          [socketId]: {
-            ...(prev[socketId] ?? { socketId }),
-            userId,
+          peers: {
+            ...prev.peers,
+            [socketId]: {
+              ...(prev.peers[socketId] ?? { socketId }),
+              userId,
+            },
           },
         }));
 
-        // New peer joined our already-joined channel -> we are ANSWERER
         if (!peerConnections.get(socketId)) {
           await createPeerConnection(socketId, false);
         }
@@ -359,177 +398,165 @@ pc.oniceconnectionstatechange = () => {
         cleanupPeer(event.socketId);
       });
 
-      // --- SIGNAL HANDLER: offers / answers / ICE ---
-      socket.on(
-        "signal",
-        async ({ fromSocketId, type, data }: SignalEvent) => {
-          if (!fromSocketId) {
-            console.warn("[webrtc] signal without fromSocketId, ignoring");
+      socket.on("signal", async ({ fromSocketId, type, data }: SignalEvent) => {
+        if (!fromSocketId) {
+          console.warn("[webrtc] signal without fromSocketId, ignoring");
+          return;
+        }
+
+        const selfId = socket.id;
+        if (fromSocketId === selfId) return;
+
+        let pc = peerConnections.get(fromSocketId);
+
+        const queueCandidate = (candidate: RTCIceCandidateInit) => {
+          const list = pendingCandidates.get(fromSocketId) || [];
+          list.push(candidate);
+          pendingCandidates.set(fromSocketId, list);
+        };
+
+        console.log(
+          "[webrtc] signal",
+          type,
+          "from",
+          fromSocketId,
+          "pc exists?",
+          !!pc,
+          "state:",
+          pc?.signalingState,
+        );
+
+        if (type === "offer") {
+          if (!pc) {
+            pc = await createPeerConnection(fromSocketId, false);
+            if (!pc) return;
+          }
+
+          try {
+            console.log(
+              "[webrtc] handling OFFER in state:",
+              pc.signalingState,
+            );
+
+            if (pc.signalingState !== "stable") {
+              console.warn(
+                "[webrtc] got offer in non-stable state, ignoring",
+                pc.signalingState,
+              );
+              return;
+            }
+
+            await pc.setRemoteDescription(
+              new RTCSessionDescription(data as RTCSessionDescriptionInit),
+            );
+            const answer = await pc.createAnswer();
+            await pc.setLocalDescription(answer);
+
+            socket.emit("signal", {
+              targetSocketId: fromSocketId,
+              type: "answer",
+              data: answer,
+            } as SignalEvent);
+
+            const queued = pendingCandidates.get(fromSocketId) || [];
+            for (const c of queued) {
+              try {
+                await pc.addIceCandidate(new RTCIceCandidate(c));
+              } catch (err) {
+                console.error("[webrtc] error adding queued ICE", err);
+              }
+            }
+            pendingCandidates.delete(fromSocketId);
+          } catch (err) {
+            console.error("[webrtc] error handling offer", err);
+          }
+        } else if (type === "answer") {
+          pc = peerConnections.get(fromSocketId);
+          if (!pc) {
+            console.warn(
+              "[webrtc] got answer but have no RTCPeerConnection for",
+              fromSocketId,
+            );
             return;
           }
 
-          const selfId = socket.id;
-          if (fromSocketId === selfId) return;
+          try {
+            console.log(
+              "[webrtc] handling ANSWER in state:",
+              pc.signalingState,
+            );
 
-          let pc = peerConnections.get(fromSocketId);
-
-          const queueCandidate = (candidate: RTCIceCandidateInit) => {
-            const list = pendingCandidates.get(fromSocketId) || [];
-            list.push(candidate);
-            pendingCandidates.set(fromSocketId, list);
-          };
-
-          console.log(
-            "[webrtc] signal",
-            type,
-            "from",
-            fromSocketId,
-            "pc exists?",
-            !!pc,
-            "state:",
-            pc?.signalingState,
-          );
-
-          if (type === "offer") {
-            // We are the ANSWERER
-            if (!pc) {
-              pc = await createPeerConnection(fromSocketId, false);
-              if (!pc) return;
+            if (pc.remoteDescription) {
+              console.warn("[webrtc] duplicate answer received, ignoring");
+              return;
             }
 
-            try {
-              console.log(
-                "[webrtc] handling OFFER in state:",
-                pc.signalingState,
-              );
-
-              // Basic glare handling – ignore offers in weird states
-              if (pc.signalingState !== "stable") {
-                console.warn(
-                  "[webrtc] got offer in non-stable state, ignoring",
-                  pc.signalingState,
-                );
-                return;
-              }
-
-              await pc.setRemoteDescription(
-                new RTCSessionDescription(
-                  data as RTCSessionDescriptionInit,
-                ),
-              );
-              const answer = await pc.createAnswer();
-              await pc.setLocalDescription(answer);
-
-              socket.emit("signal", {
-                targetSocketId: fromSocketId,
-                type: "answer",
-                data: answer,
-              } as SignalEvent);
-
-              const queued = pendingCandidates.get(fromSocketId) || [];
-              for (const c of queued) {
-                try {
-                  await pc.addIceCandidate(new RTCIceCandidate(c));
-                } catch (err) {
-                  console.error("[webrtc] error adding queued ICE", err);
-                }
-              }
-              pendingCandidates.delete(fromSocketId);
-            } catch (err) {
-              console.error("[webrtc] error handling offer", err);
-            }
-          } else if (type === "answer") {
-            // We are the INITIATOR
-            pc = peerConnections.get(fromSocketId);
-            if (!pc) {
+            if (pc.signalingState !== "have-local-offer") {
               console.warn(
-                "[webrtc] got answer but have no RTCPeerConnection for",
-                fromSocketId,
+                "[webrtc] answer in invalid state, ignoring:",
+                pc.signalingState,
               );
               return;
             }
 
-            try {
-              console.log(
-                "[webrtc] handling ANSWER in state:",
-                pc.signalingState,
-              );
+            await pc.setRemoteDescription(
+              new RTCSessionDescription(data as RTCSessionDescriptionInit),
+            );
 
-              // Guard: if we already have a remoteDescription, ignore duplicates
-              if (pc.remoteDescription) {
-                console.warn(
-                  "[webrtc] duplicate answer received, ignoring",
-                );
-                return;
+            const queued = pendingCandidates.get(fromSocketId) || [];
+            for (const c of queued) {
+              try {
+                await pc.addIceCandidate(new RTCIceCandidate(c));
+              } catch (err) {
+                console.error("[webrtc] error adding queued ICE", err);
               }
-
-              if (pc.signalingState !== "have-local-offer") {
-                console.warn(
-                  "[webrtc] answer in invalid state, ignoring:",
-                  pc.signalingState,
-                );
-                return;
-              }
-
-              await pc.setRemoteDescription(
-                new RTCSessionDescription(
-                  data as RTCSessionDescriptionInit,
-                ),
-              );
-
-              const queued = pendingCandidates.get(fromSocketId) || [];
-              for (const c of queued) {
-                try {
-                  await pc.addIceCandidate(new RTCIceCandidate(c));
-                } catch (err) {
-                  console.error("[webrtc] error adding queued ICE", err);
-                }
-              }
-              pendingCandidates.delete(fromSocketId);
-            } catch (err) {
-              console.error("[webrtc] error handling answer", err);
             }
-          } else if (type === "ice-candidate") {
-            const candidateData = data as RTCIceCandidateInit;
+            pendingCandidates.delete(fromSocketId);
+          } catch (err) {
+            console.error("[webrtc] error handling answer", err);
+          }
+        } else if (type === "ice-candidate") {
+          const candidateData = data as RTCIceCandidateInit;
 
-            pc = peerConnections.get(fromSocketId);
-            if (!pc) {
+          pc = peerConnections.get(fromSocketId);
+          if (!pc) {
+            console.warn(
+              "[webrtc] ICE before PC exists, queuing for",
+              fromSocketId,
+            );
+            queueCandidate(candidateData);
+            return;
+          }
+
+          try {
+            if (pc.remoteDescription) {
+              await pc.addIceCandidate(new RTCIceCandidate(candidateData));
+            } else {
               console.warn(
-                "[webrtc] ICE before PC exists, queuing for",
+                "[webrtc] ICE before remoteDescription, queueing for",
                 fromSocketId,
               );
               queueCandidate(candidateData);
-              return;
             }
-
-            try {
-              if (pc.remoteDescription) {
-                await pc.addIceCandidate(
-                  new RTCIceCandidate(candidateData),
-                );
-              } else {
-                console.warn(
-                  "[webrtc] ICE before remoteDescription, queueing for",
-                  fromSocketId,
-                );
-                queueCandidate(candidateData);
-              }
-            } catch (err) {
-              console.error("[webrtc] error adding ice candidate", err);
-            }
+          } catch (err) {
+            console.error("[webrtc] error adding ice candidate", err);
           }
-        },
-      );
+        }
+      });
 
       socket.on("exception", (err: any) => {
         console.error("[voice] exception from server", err);
-        setError(err?.message ?? "Voice error");
-        setJoinedChannelId(null);
+        notify((prev) => ({
+          ...prev,
+          error: err?.message ?? "Voice error",
+          joinedChannelId: null,
+          connecting: false,
+        }));
       });
     }
 
     return socket;
-  }, [cleanupPeer, createPeerConnection, joinedChannelId]);
+  }, [cleanupPeer, createPeerConnection]);
 
   /* ------------ cleanup on unmount ------------ */
 
@@ -538,8 +565,6 @@ pc.oniceconnectionstatechange = () => {
       console.log(
         "[voice-hook] cleanup on unmount (no socket disconnect here)",
       );
-      // We deliberately do NOT disconnect the singleton socket here,
-      // because other hook instances (or components) in this tab may still use it.
     };
   }, []);
 
@@ -551,23 +576,23 @@ pc.oniceconnectionstatechange = () => {
       const s = ensureSocket();
       if (!s) return;
 
-      setError(null);
-      setConnecting(true);
+      notify((prev) => ({
+        ...prev,
+        error: null,
+        connecting: true,
+      }));
 
-      // will silently fail if mic denied – that’s fine
       await ensureLocalStream();
 
       const emitJoin = () => {
         console.log("[voice-hook] emitting join-channel", channelId);
         s.emit("join-channel", { channelId });
-        setJoinedChannelId(channelId);
-        setConnecting(false);
+        // joinedChannelId is set on channel-joined
       };
 
       if (s.connected) {
         emitJoin();
       } else {
-        // if not yet connected, wait for connect once
         s.once("connect", emitJoin);
       }
     },
@@ -579,14 +604,16 @@ pc.oniceconnectionstatechange = () => {
     leaveCurrentChannel();
   }, [leaveCurrentChannel]);
 
+  const peersArray = Object.values(state.peers);
+
   return {
-    joinedChannelId,
-    peers: Object.values(peers),
-    connecting,
-    error,
+    joinedChannelId: state.joinedChannelId,
+    peers: peersArray,
+    connecting: state.connecting,
+    error: state.error,
     joinChannel,
     leaveChannel,
-    localStream, // your own mic stream, can feed into SpeakingAvatar
+    localStream: state.localStream,
     outputVolume,
   };
 }

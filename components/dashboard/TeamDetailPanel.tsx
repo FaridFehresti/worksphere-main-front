@@ -473,35 +473,35 @@ export default function TeamDetailPanel({ teamId }: Props) {
 
                         {/* Occupants */}
                         {joined && (
-                          <Box className="flex flex-wrap gap-1 pl-1 items-center mt-1">
-                            {/* Local user */}
-{currentUser && localStream && (
-  <SpeakingAvatar
-    stream={localStream}
-    nameOrEmail={currentUser.name || currentUser.email || "You"}
-    tooltipLabel="You"
-    playAudio={false}      // 👈 prevent self-echo
-  />
-)}
+  <Box className="flex flex-wrap gap-1 pl-1 items-center mt-1">
+    {/* Local user */}
+    {currentUser && localStream && (
+      <SpeakingAvatar
+        stream={localStream}
+        nameOrEmail={currentUser.name || currentUser.email || "You"}
+        tooltipLabel="You"
+        playAudio={false}      // 👈 prevent self-echo
+      />
+    )}
 
-{/* Remote peers – playback ON */}
-{channelPeers.map((peer) =>
-  peer.stream ? (
-    <SpeakingAvatar
-      key={peer.socketId}
-      stream={peer.stream}
-      nameOrEmail={peer.userId || "Peer"}
-      tooltipLabel={peer.userId || peer.socketId}
-      playAudio={true}     // 👈 make sure this is true / default
-    />
-  ) : null
-)}
+    {/* Remote peers – playback ON */}
+    {channelPeers.map((peer) =>
+      peer.stream ? (
+        <SpeakingAvatar
+          key={peer.socketId}
+          stream={peer.stream}
+          nameOrEmail={peer.userId || "Peer"}
+          tooltipLabel={peer.userId || peer.socketId}
+          playAudio={true}
+        />
+      ) : null
+    )}
 
-                            <Typography className="text-[10px] text-graybrand-300 ml-1">
-                              {1 + channelPeers.length} in channel
-                            </Typography>
-                          </Box>
-                        )}
+    <Typography className="text-[10px] text-graybrand-300 ml-1">
+      {1 + channelPeers.length} in channel
+    </Typography>
+  </Box>
+)}
                       </Box>
                     );
                   })}
