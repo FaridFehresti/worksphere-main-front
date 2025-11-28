@@ -1,3 +1,4 @@
+// lib/voice/useVoiceChannel.ts
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
@@ -66,6 +67,7 @@ export function useVoiceChannel() {
   const [peers, setPeers] = useState<Record<string, VoicePeer>>({});
   const [connecting, setConnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [localStream, setLocalStream] = useState<MediaStream | null>(null);
 
   /* ------------ helpers: local media ------------ */
 
@@ -75,34 +77,40 @@ export function useVoiceChannel() {
       myStream.getTracks().forEach((t) => t.stop());
       myStream = null;
     }
+    setLocalStream(null);
   }, []);
 
   /**
    * Try to get local mic, but if it fails we just log and continue.
    * This allows LISTENER-ONLY users (no mic / no permissions).
    */
- // inside useVoiceChannel.ts
-const [localStream, setLocalStream] = useState<MediaStream | null>(null);
+  const ensureLocalStream = useCallback(
+    async () => {
+      if (localStream) return localStream;
 
-const ensureLocalStream = async () => {
-  if (localStream) return localStream;
+      console.log("[voice-hook] ensureLocalStream: trying to acquire mic");
+      try {
+        const constraints: MediaStreamConstraints = {
+          audio: inputDeviceId
+            ? { deviceId: { exact: inputDeviceId } }
+            : true,
+        };
 
-  console.log("[voice-hook] ensureLocalStream: trying to acquire mic");
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    console.log("[voice-hook] ensureLocalStream: got local media stream");
-    setLocalStream(stream);
-    return stream;
-  } catch (err) {
-    console.warn("[voice-hook] ensureLocalStream: failed to get mic", err);
-    // don't throw – we can still join as listener
-    return null;
-  }
-};
+        const stream = await navigator.mediaDevices.getUserMedia(constraints);
+        console.log("[voice-hook] ensureLocalStream: got local media stream");
 
+        myStream = stream;
+        setLocalStream(stream);
 
-
-
+        return stream;
+      } catch (err) {
+        console.warn("[voice-hook] ensureLocalStream: failed to get mic", err);
+        // don't throw – we can still join as listener
+        return null;
+      }
+    },
+    [inputDeviceId, localStream],
+  );
 
   /* ------------ helpers: peers / PCs ------------ */
 
@@ -139,6 +147,7 @@ const ensureLocalStream = async () => {
       cleanupPeer(peerId);
     }
     peerConnections.clear();
+    pendingCandidates.clear();
     stopLocalStream();
     setJoinedChannelId(null);
     setPeers({});
@@ -166,7 +175,7 @@ const ensureLocalStream = async () => {
         "[voice-hook] creating RTCPeerConnection for",
         peerSocketId,
         "initiator:",
-        isInitiator
+        isInitiator,
       );
 
       const pc = new RTCPeerConnection({
@@ -182,7 +191,7 @@ const ensureLocalStream = async () => {
         // No local stream, but we are the offerer:
         // explicitly say "I want to RECEIVE audio" (recvonly).
         console.log(
-          "[voice-hook] no local stream, adding recvonly audio transceiver"
+          "[voice-hook] no local stream, adding recvonly audio transceiver",
         );
         pc.addTransceiver("audio", { direction: "recvonly" });
       }
@@ -233,7 +242,7 @@ const ensureLocalStream = async () => {
 
       return pc;
     },
-    [ensureLocalStream]
+    [ensureLocalStream],
   );
 
   /* ------------ ensure & connect socket ------------ */
@@ -244,17 +253,23 @@ const ensureLocalStream = async () => {
     // shared socket instance
     if (!socketSingleton) {
       console.log("[voice-hook] creating voice socket");
-      socketSingleton = getVoiceSocket();
+      socketSingleton = getVoiceSocket(); // <-- auth + transports configured there
     }
+
     const socket = socketSingleton;
 
-    // set auth
+    // 🔄 Refresh auth in case token changed since socket creation
     const token = getToken();
     if (token) {
       (socket as any).auth = { token };
-      console.log("[voice-hook] set socket auth token");
     } else {
       console.warn("[voice-hook] no token in ensureSocket");
+    }
+
+    // Connect if not already connected
+    if (!socket.connected) {
+      console.log("[voice-hook] connecting voice socket");
+      socket.connect();
     }
 
     // Attach listeners only once per tab
@@ -271,6 +286,7 @@ const ensureLocalStream = async () => {
 
       socket.on("connect_error", (err) => {
         console.error("[voice] connect_error", err);
+        // don't spam state resets if unmounted
         setError(err.message || "Voice connection failed");
       });
 
@@ -287,12 +303,13 @@ const ensureLocalStream = async () => {
 
       socket.on("peer-joined", async (event: PeerJoinedEvent) => {
         console.log("[voice] peer-joined", event);
-        if (!joinedChannelId || joinedChannelId !== event.channelId) {
-          // We'll still create PCs if needed once joinedChannelId updates,
-          // but avoid stale channel events.
-        }
 
-        const { socketId, userId } = event;
+        const { channelId, socketId, userId } = event;
+
+        // avoid stale channel events
+        if (!joinedChannelId || joinedChannelId !== channelId) {
+          // we could ignore or still accept; for now, ignore if channel doesn't match
+        }
 
         setPeers((prev) => ({
           ...prev,
@@ -317,7 +334,6 @@ const ensureLocalStream = async () => {
       socket.on(
         "signal",
         async ({ fromSocketId, type, data }: SignalEvent) => {
-          // ✅ guard to ensure fromSocketId is a string below
           if (!fromSocketId) {
             console.warn("[webrtc] signal without fromSocketId, ignoring");
             return;
@@ -342,7 +358,7 @@ const ensureLocalStream = async () => {
             "pc exists?",
             !!pc,
             "state:",
-            pc?.signalingState
+            pc?.signalingState,
           );
 
           if (type === "offer") {
@@ -355,20 +371,22 @@ const ensureLocalStream = async () => {
             try {
               console.log(
                 "[webrtc] handling OFFER in state:",
-                pc.signalingState
+                pc.signalingState,
               );
 
               // Basic glare handling – ignore offers in weird states
               if (pc.signalingState !== "stable") {
                 console.warn(
                   "[webrtc] got offer in non-stable state, ignoring",
-                  pc.signalingState
+                  pc.signalingState,
                 );
                 return;
               }
 
               await pc.setRemoteDescription(
-                new RTCSessionDescription(data as RTCSessionDescriptionInit)
+                new RTCSessionDescription(
+                  data as RTCSessionDescriptionInit,
+                ),
               );
               const answer = await pc.createAnswer();
               await pc.setLocalDescription(answer);
@@ -397,7 +415,7 @@ const ensureLocalStream = async () => {
             if (!pc) {
               console.warn(
                 "[webrtc] got answer but have no RTCPeerConnection for",
-                fromSocketId
+                fromSocketId,
               );
               return;
             }
@@ -405,13 +423,13 @@ const ensureLocalStream = async () => {
             try {
               console.log(
                 "[webrtc] handling ANSWER in state:",
-                pc.signalingState
+                pc.signalingState,
               );
 
               // Guard: if we already have a remoteDescription, ignore duplicates
               if (pc.remoteDescription) {
                 console.warn(
-                  "[webrtc] duplicate answer received, ignoring"
+                  "[webrtc] duplicate answer received, ignoring",
                 );
                 return;
               }
@@ -419,13 +437,15 @@ const ensureLocalStream = async () => {
               if (pc.signalingState !== "have-local-offer") {
                 console.warn(
                   "[webrtc] answer in invalid state, ignoring:",
-                  pc.signalingState
+                  pc.signalingState,
                 );
                 return;
               }
 
               await pc.setRemoteDescription(
-                new RTCSessionDescription(data as RTCSessionDescriptionInit)
+                new RTCSessionDescription(
+                  data as RTCSessionDescriptionInit,
+                ),
               );
 
               const queued = pendingCandidates.get(fromSocketId) || [];
@@ -447,7 +467,7 @@ const ensureLocalStream = async () => {
             if (!pc) {
               console.warn(
                 "[webrtc] ICE before PC exists, queuing for",
-                fromSocketId
+                fromSocketId,
               );
               queueCandidate(candidateData);
               return;
@@ -456,12 +476,12 @@ const ensureLocalStream = async () => {
             try {
               if (pc.remoteDescription) {
                 await pc.addIceCandidate(
-                  new RTCIceCandidate(candidateData)
+                  new RTCIceCandidate(candidateData),
                 );
               } else {
                 console.warn(
                   "[webrtc] ICE before remoteDescription, queueing for",
-                  fromSocketId
+                  fromSocketId,
                 );
                 queueCandidate(candidateData);
               }
@@ -469,7 +489,7 @@ const ensureLocalStream = async () => {
               console.error("[webrtc] error adding ice candidate", err);
             }
           }
-        }
+        },
       );
 
       socket.on("exception", (err: any) => {
@@ -487,7 +507,7 @@ const ensureLocalStream = async () => {
   useEffect(() => {
     return () => {
       console.log(
-        "[voice-hook] cleanup on unmount (no socket disconnect here)"
+        "[voice-hook] cleanup on unmount (no socket disconnect here)",
       );
       // We deliberately do NOT disconnect the singleton socket here,
       // because other hook instances (or components) in this tab may still use it.
@@ -496,23 +516,34 @@ const ensureLocalStream = async () => {
 
   /* ------------ public API ------------ */
 
-  const joinChannel = async (channelId: string) => {
-  console.log("[voice-hook] joinChannel called", channelId);
-  const s = await ensureSocket(); // your existing socket init
-  if (!s) return;
+  const joinChannel = useCallback(
+    async (channelId: string) => {
+      console.log("[voice-hook] joinChannel called", channelId);
+      const s = ensureSocket();
+      if (!s) return;
 
-  setError(null);
-  setConnecting(true);
+      setError(null);
+      setConnecting(true);
 
-  // will silently fail if mic denied – that’s fine
-  await ensureLocalStream();
+      // will silently fail if mic denied – that’s fine
+      await ensureLocalStream();
 
-  console.log("[voice-hook] emitting join-channel", channelId);
-  s.emit("join-channel", { channelId });
+      const emitJoin = () => {
+        console.log("[voice-hook] emitting join-channel", channelId);
+        s.emit("join-channel", { channelId });
+        setJoinedChannelId(channelId);
+        setConnecting(false);
+      };
 
-  setJoinedChannelId(channelId);
-  setConnecting(false);
-};
+      if (s.connected) {
+        emitJoin();
+      } else {
+        // if not yet connected, wait for connect once
+        s.once("connect", emitJoin);
+      }
+    },
+    [ensureSocket, ensureLocalStream],
+  );
 
   const leaveChannel = useCallback(() => {
     console.log("[voice-hook] leaveChannel called");
@@ -526,7 +557,7 @@ const ensureLocalStream = async () => {
     error,
     joinChannel,
     leaveChannel,
-    localStream: myStream,
+    localStream, // your own mic stream, can feed into SpeakingAvatar
     outputVolume,
   };
 }

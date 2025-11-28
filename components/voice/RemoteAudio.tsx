@@ -85,7 +85,6 @@ export default function RemoteAudio({
     };
   }, [stream, onLevel]);
 
-  // Hidden audio element (no controls)
   return (
     <audio
       ref={audioRef}
