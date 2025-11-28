@@ -6,7 +6,7 @@ import { useEffect, useRef } from "react";
 type RemoteAudioProps = {
   stream?: MediaStream | null;
   muted?: boolean;
-  volume?: number;
+  volume?: number; // 0..1 or 0..100, we'll clamp
   onLevel?: (level: number) => void;
 };
 
@@ -22,28 +22,61 @@ export default function RemoteAudio({
   // Attach stream + volume + playback
   useEffect(() => {
     const el = audioRef.current;
-    if (!el || !stream) return;
+    if (!el) return;
 
-    el.srcObject = stream;
+    // No stream -> stop and clear
+    if (!stream) {
+      el.pause();
+      (el as any).srcObject = null;
+      return;
+    }
+
+    // Clamp volume (support 0..1 or 0..100)
+    const volNorm = volume > 1 ? volume / 100 : volume;
     el.muted = muted;
-    el.volume = Math.max(0, Math.min(1, volume ?? 1));
+    el.volume = Math.max(0, Math.min(1, volNorm));
 
-    const playPromise = el.play();
-    if (playPromise && typeof playPromise.then === "function") {
-      playPromise.catch((err) => {
-        console.warn("[RemoteAudio] autoplay failed", err);
-      });
+    // Only reset srcObject if it actually changed
+    if (el.srcObject !== stream) {
+      // Stop any current playback first to avoid AbortError
+      el.pause();
+      (el as any).srcObject = stream;
+    }
+
+    const tryPlay = () => {
+      const p = el.play();
+      if (p && typeof p.then === "function") {
+        p.catch((err: any) => {
+          // AbortError = new load() while play in-flight; ignore
+          if (err?.name === "AbortError") {
+            console.warn("[RemoteAudio] play aborted (new load), will retry");
+            return;
+          }
+          console.warn("[RemoteAudio] autoplay failed", err);
+        });
+      }
+    };
+
+    // If element is already ready, try immediately, otherwise wait for canplay
+    const onCanPlay = () => {
+      tryPlay();
+    };
+
+    el.addEventListener("canplay", onCanPlay);
+
+    // In case the stream is already ready:
+    if (el.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
+      tryPlay();
     }
 
     return () => {
-      if (audioRef.current === el) {
-        el.pause();
-        el.srcObject = null;
-      }
+      el.removeEventListener("canplay", onCanPlay);
+      // Don't clear srcObject here; just pause
+      el.pause();
     };
   }, [stream, muted, volume]);
 
-  // Simple level meter using Web Audio
+  // Optional simple level meter (if you ever use onLevel)
   useEffect(() => {
     if (!onLevel || !stream) return;
 
@@ -86,11 +119,12 @@ export default function RemoteAudio({
   }, [stream, onLevel]);
 
   return (
-    <audio
-      ref={audioRef}
-      autoPlay
-      playsInline
-      style={{ display: "none" }}
-    />
+     <audio
+    ref={audioRef}
+    controls   // 👈 add
+    autoPlay
+    playsInline
+    style={{ width: 200 }}
+  />
   );
 }

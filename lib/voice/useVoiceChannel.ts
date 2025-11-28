@@ -84,65 +84,46 @@ export function useVoiceChannel() {
    * Try to get local mic, but if it fails we just log and continue.
    * This allows LISTENER-ONLY users (no mic / no permissions).
    */
-  const ensureLocalStream = useCallback(
-  async () => {
-    if (localStream) return localStream;
+  const ensureLocalStream = useCallback(async () => {
+  if (localStream) return localStream;
 
-    console.log("[voice-hook] ensureLocalStream: trying to acquire mic");
+  console.log("[voice-hook] ensureLocalStream: trying to acquire mic");
 
-    const buildConstraints = (deviceId?: string | null): MediaStreamConstraints => ({
-      audio: deviceId ? { deviceId: { exact: deviceId } } : true,
-    });
-
-    try {
-      // First try the selected device
-      const stream = await navigator.mediaDevices.getUserMedia(
-        buildConstraints(inputDeviceId ?? null),
-      );
-      console.log("[voice-hook] ensureLocalStream: got local media stream");
-
-      myStream = stream;
-      setLocalStream(stream);
-      return stream;
-    } catch (err: any) {
-      console.warn(
-        "[voice-hook] ensureLocalStream: failed with selected device, err=",
-        err?.name,
-        err,
-      );
-
-      // If it's a constraint/device issue, try again with default device
-      if (
-        err?.name === "OverconstrainedError" ||
-        err?.name === "NotFoundError"
-      ) {
-        try {
-          console.log(
-            "[voice-hook] retrying getUserMedia with default device",
-          );
-          const fallbackStream = await navigator.mediaDevices.getUserMedia(
-            buildConstraints(null),
-          );
-          console.log(
-            "[voice-hook] ensureLocalStream: got local media stream with fallback device",
-          );
-          myStream = fallbackStream;
-          setLocalStream(fallbackStream);
-          return fallbackStream;
-        } catch (fallbackErr) {
-          console.warn(
-            "[voice-hook] fallback getUserMedia failed, joining as listener only",
-            fallbackErr,
-          );
-        }
+  try {
+    if (inputDeviceId) {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: { deviceId: { exact: inputDeviceId } },
+        });
+        console.log("[voice-hook] ensureLocalStream: got stream with selected device");
+        myStream = stream;
+        setLocalStream(stream);
+        return stream;
+      } catch (err) {
+        console.warn(
+          "[voice-hook] ensureLocalStream: failed with selected device, err=",
+          err,
+        );
+        // clear invalid deviceId so next time you don't keep failing
+        // useAudioStore.getState().setInputDeviceId(null); // if you have such action
       }
-
-      // Listener-only mode
-      return null;
     }
-  },
-  [inputDeviceId, localStream],
-);
+
+    console.log("[voice-hook] retrying getUserMedia with default device");
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    console.log("[voice-hook] ensureLocalStream: got fallback stream");
+    myStream = stream;
+    setLocalStream(stream);
+    return stream;
+  } catch (err) {
+    console.warn(
+      "[voice-hook] fallback getUserMedia failed, joining as listener only",
+      err,
+    );
+    return null;
+  }
+}, [inputDeviceId, localStream]);
+
 
   /* ------------ helpers: peers / PCs ------------ */
 
@@ -211,9 +192,25 @@ export function useVoiceChannel() {
       );
 
       const pc = new RTCPeerConnection({
-        iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
-      });
-
+  iceServers: [
+    {
+      urls: "stun:91.212.174.166:3478",
+    },
+    {
+      urls: "turn:91.212.174.166:3478?transport=udp",
+      username: "turnuser",
+      credential: "turnpassword",
+    },
+  ],
+});
+pc.oniceconnectionstatechange = () => {
+  console.log(
+    "[webrtc] iceConnectionState for",
+    peerSocketId,
+    "=>",
+    pc.iceConnectionState
+  );
+};
       // If we have a local stream -> add tracks (we are sending audio).
       if (myStream) {
         myStream.getTracks().forEach((track) => {

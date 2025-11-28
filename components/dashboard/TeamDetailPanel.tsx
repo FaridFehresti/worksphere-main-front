@@ -480,10 +480,11 @@ export default function TeamDetailPanel({ teamId }: Props) {
     stream={localStream}
     nameOrEmail={currentUser.name || currentUser.email || "You"}
     tooltipLabel="You"
-    playAudio={false}       // 👈 DO NOT play your own mic
+    playAudio={false}      // 👈 prevent self-echo
   />
 )}
 
+{/* Remote peers – playback ON */}
 {channelPeers.map((peer) =>
   peer.stream ? (
     <SpeakingAvatar
@@ -491,8 +492,7 @@ export default function TeamDetailPanel({ teamId }: Props) {
       stream={peer.stream}
       nameOrEmail={peer.userId || "Peer"}
       tooltipLabel={peer.userId || peer.socketId}
-      playAudio={true}      // 👈 Explicit for clarity (default anyway)
-      // volume={outputVolume} // optional: from useVoiceChannel
+      playAudio={true}     // 👈 make sure this is true / default
     />
   ) : null
 )}
