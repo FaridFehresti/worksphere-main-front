@@ -1,47 +1,20 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { motion } from "framer-motion";
-import { useUserStore } from "@/lib/store/user";
+import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
 import { useLogout } from "@/lib/logout";
-import {
-  Box,
-  Button,
-  Avatar,
-  Typography,
-} from "@mui/material";
-import { Sparkles, Clock, Globe2 } from "lucide-react";
-import MeshSphereBackground from "@/components/background/MeshSphereBackground";
+
 import { useEffect } from "react";
-import { clearToken, getToken } from "@/lib/auth-storage";
-import apiClient from "@/lib/api-client";
-import { API_ENDPOINT } from "@/lib/api-url";
+import { motion } from "framer-motion";
+import { Box, Button, Avatar, Typography } from "@mui/material";
+import { Sparkles, Clock, Globe2 } from "lucide-react";
+
+import MeshSphereBackground from "@/components/background/MeshSphereBackground";
 
 export default function HomePage() {
   const router = useRouter();
-  const user = useUserStore((s) => s.user);
-  const setUser = useUserStore((s) => s.setUser);
+  const { user } = useCurrentUser(); // ← centralized user
   const logout = useLogout();
-
-  // 🔥 Hydrate user if we have a token but no user yet
-  useEffect(() => {
-  const token = getToken();
-  if (!token || user) return;
-
-  (async () => {
-    try {
-      const res = await apiClient.get(API_ENDPOINT.auth.me);
-   
-      setUser(res.data);
-    } catch (err: any) {
-      console.error("Failed to fetch /me", err);
-
-      clearToken();
-      setUser(null);
-    }
-  })();
-}, [user, setUser]);
-
 
   const handleDashboardClick = () => router.push("/dashboard");
   const handleLoginClick = () => router.push("/auth/login");
@@ -54,8 +27,11 @@ export default function HomePage() {
       .slice(0, 2)
       .join("") || "?";
 
-  const glassItem =
-    " bg-white/10 border border-white/20 rounded-2xl";
+  const joinedAtLabel = user?.createdAt
+    ? new Date(user.createdAt).toLocaleDateString()
+    : null;
+
+  const glassItem = " bg-white/10 border border-white/20 rounded-2xl";
 
   return (
     <Box
@@ -110,23 +86,41 @@ export default function HomePage() {
           {/* Actions */}
           <div className="flex items-center gap-3">
             {user && (
-              <div className="hidden md:flex items-center gap-2 rounded-full bg-white/5 border border-white/20 px-2 py-1.5">
+              <div
+                className="
+                  hidden md:flex items-center
+                  gap-3
+                  rounded-full bg-white/5 border border-white/20
+                  px-3 py-2
+                  max-w-[280px]
+                  overflow-hidden
+                  backdrop-blur-xl bg-white/10 hover:bg-white/15
+                  transition-all
+                "
+              >
                 <Avatar
+                  src={user.avatarUrl || undefined}
+                  alt={user.name || user.email || "Profile"}
                   sx={{
-                    width: 26,
-                    height: 26,
+                    width: 30,
+                    height: 30,
                     bgcolor: "rgba(108,207,246,0.2)",
-                    fontSize: 12,
+                    fontSize: 13,
                   }}
                 >
-                  {initials}
+                  {!user.avatarUrl && initials}
                 </Avatar>
-                <div className="flex flex-col leading-tight">
+                <div className="flex flex-col leading-tight min-w-0">
                   <span className="text-[11px] text-graybrand-200">
-                    Signed in
+                    Signed in as
                   </span>
-                  <span className="text-[12px] text-bglight font-medium truncate max-w-[160px]">
-                    {user.name || user.email}
+                  <span className="text-[12px] text-bglight font-medium truncate max-w-[220px]">
+                    {user.name || user.username || user.email}
+                  </span>
+                  <span className="text-[11px] text-graybrand-300 truncate max-w-[220px]">
+                    {user.username
+                      ? `@${user.username} • ${user.email}`
+                      : user.email}
                   </span>
                 </div>
               </div>
@@ -369,6 +363,8 @@ export default function HomePage() {
                 `}
               >
                 <Avatar
+                  src={user?.avatarUrl || undefined}
+                  alt={user?.name || user?.email || "Profile"}
                   sx={{
                     width: 40,
                     height: 40,
@@ -377,28 +373,41 @@ export default function HomePage() {
                     fontSize: 16,
                   }}
                 >
-                  {initials}
+                  {!user?.avatarUrl && initials}
                 </Avatar>
+
                 {user ? (
                   <div className="flex-1 min-w-0">
                     <Typography
                       variant="body2"
                       className="text-bglight truncate"
                     >
-                      {user.name || "No name set"}
+                      {user.name || user.username || user.email}
                     </Typography>
+
                     <Typography
                       variant="caption"
-                      className="text-graybrand-200 truncate"
+                      className="text-graybrand-200 truncate block"
                     >
-                      {user.email}
+                      {user.username
+                        ? `@${user.username} • ${user.email}`
+                        : user.email}
                     </Typography>
-                    <Typography
-                      variant="caption"
-                      className="text-primary-200 mt-1 block"
-                    >
-                      You&apos;re ready to continue where you left off.
-                    </Typography>
+
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1 text-[11px]">
+                      {user.timezone && (
+                        <span className="inline-flex items-center gap-1 text-primary-200">
+                          <Globe2 className="h-3 w-3" />
+                          <span>{user.timezone}</span>
+                        </span>
+                      )}
+                      {joinedAtLabel && (
+                        <span className="inline-flex items-center gap-1 text-graybrand-300">
+                          <Clock className="h-3 w-3" />
+                          <span>Member since {joinedAtLabel}</span>
+                        </span>
+                      )}
+                    </div>
                   </div>
                 ) : (
                   <div className="flex-1 min-w-0">
@@ -413,6 +422,7 @@ export default function HomePage() {
                     </Typography>
                   </div>
                 )}
+
                 <Button
                   variant="outlined"
                   size="small"

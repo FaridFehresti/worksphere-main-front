@@ -1,15 +1,8 @@
 // components/dashboard/TeamDetailPanel.tsx
 "use client";
 
-import { useEffect, useState } from "react";
-import {
-  Box,
-  Divider,
-  Typography,
-  CircularProgress,
-  Avatar,
-} from "@mui/material";
-import { Users2, Server as ServerIcon, Hash, Mic2 } from "lucide-react";
+import { useEffect, useState, useMemo } from "react";
+import { Box, Typography, CircularProgress, Avatar } from "@mui/material";
 
 import {
   fetchMyTeams,
@@ -17,56 +10,30 @@ import {
   Team,
   TeamMember,
 } from "@/lib/api/teams";
-import {
-  fetchServersForTeam,
-  Server as ServerType,
-} from "@/lib/api/servers";
-import {
-  fetchChannelsForServer,
-  Channel,
-} from "@/lib/api/channels";
-
-import CreateChannelForm from "./CreateChannelForm";
 import { useUserStore } from "@/lib/store/user";
-
-// 🔊 voice imports
-import { useVoiceChannel } from "@/lib/voice/useVoiceChannel";
-import SpeakingAvatar from "@/components/voice/SpeakingAvatar";
-import { useSearchParams } from "next/navigation";
+import TeamVoiceStrip from "./TeamVoiceStrip";
+import TeamChatPanel from "./TeamChatPanel";
 
 type Props = {
   teamId: string;
 };
 
+// Helpers to safely access optional fields that aren't in the TS type
+const getUserUsername = (u: TeamMember["user"]): string | undefined => {
+  return (u as any).username as string | undefined;
+};
+
+const getUserAvatarUrl = (u: TeamMember["user"]): string | undefined => {
+  return (u as any).avatarUrl as string | undefined;
+};
+
 export default function TeamDetailPanel({ teamId }: Props) {
   const currentUser = useUserStore((s) => s.user);
 
-  const searchParams = useSearchParams();
-  const serverIdFromUrl = searchParams.get("serverId");
-  const channelIdFromUrl = searchParams.get("channelId");
-
   const [team, setTeam] = useState<Team | null>(null);
   const [members, setMembers] = useState<TeamMember[]>([]);
-  const [servers, setServers] = useState<ServerType[]>([]);
-  const [channels, setChannels] = useState<Channel[]>([]);
-
-  const [selectedServerId, setSelectedServerId] = useState<string | null>(null);
-
   const [loadingTeam, setLoadingTeam] = useState(false);
   const [loadingMembers, setLoadingMembers] = useState(false);
-  const [loadingServers, setLoadingServers] = useState(false);
-  const [loadingChannels, setLoadingChannels] = useState(false);
-
-  // 🔊 voice hook
-  const {
-    joinedChannelId,
-    peers,
-    connecting,
-    error,
-    joinChannel,
-    leaveChannel,
-    localStream,
-  } = useVoiceChannel();
 
   /* ------------ LOAD HELPERS ------------ */
 
@@ -95,113 +62,40 @@ export default function TeamDetailPanel({ teamId }: Props) {
     }
   };
 
-  const loadServers = async () => {
-    try {
-      setLoadingServers(true);
-      const data = await fetchServersForTeam(teamId);
-      setServers(data);
-    } catch (err) {
-      console.error("Failed to load servers", err);
-    } finally {
-      setLoadingServers(false);
-    }
-  };
-
-  const loadChannels = async (serverId: string | null) => {
-    if (!serverId) {
-      setChannels([]);
-      return;
-    }
-    try {
-      setLoadingChannels(true);
-      const data = await fetchChannelsForServer(serverId);
-      setChannels(data);
-    } catch (err) {
-      console.error("Failed to load channels", err);
-    } finally {
-      setLoadingChannels(false);
-    }
-  };
-
-  /* ------------ INITIAL LOAD ON TEAM CHANGE ------------ */
-
   useEffect(() => {
-    setSelectedServerId(null);
-    setChannels([]);
-    loadTeamName();
-    loadMembers();
-    loadServers();
+    void loadTeamName();
+    void loadMembers();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [teamId]);
 
-  /* ------------ SYNC SERVER SELECTION WITH URL OR FIRST SERVER ------------ */
-
-  useEffect(() => {
-    if (serverIdFromUrl) {
-      setSelectedServerId(serverIdFromUrl);
-    } else if (!selectedServerId && servers.length > 0) {
-      setSelectedServerId(servers[0].id);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [serverIdFromUrl, servers]);
-
-  /* ------------ LOAD CHANNELS WHEN SERVER CHANGES ------------ */
-
-  useEffect(() => {
-    loadChannels(selectedServerId);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedServerId]);
-
-  /* ------------ DERIVED DATA ------------ */
-
-  const textChannels = channels.filter((c) => c.type === "TEXT");
-  const voiceChannels = channels.filter((c) => c.type === "VOICE");
-
-  const selectedChannelFromUrl =
-    channelIdFromUrl && channels.length > 0
-      ? channels.find((c) => c.id === channelIdFromUrl) ?? null
-      : null;
+  /* ------------ HELPERS ------------ */
 
   const initialsFromMember = (m: TeamMember) => {
-    const name = m.user.name || m.user.email;
-    const parts = name.split(" ");
+    const username = getUserUsername(m.user);
+    const display = m.user.name || username || m.user.email || "User";
+    const parts = display.trim().split(" ");
     if (parts.length === 1) return parts[0][0]?.toUpperCase() ?? "?";
     return (parts[0][0] + parts[1][0]).toUpperCase();
   };
 
-  const currentUserInitials = () => {
-    if (!currentUser) return "?";
-    const name = currentUser.name || currentUser.email || "U";
-    const parts = name.split(" ");
-    if (parts.length === 1) return parts[0][0]?.toUpperCase() ?? "U";
-    return (parts[0][0] + parts[1][0]).toUpperCase();
-  };
+  const memberCount = members.length;
 
-  const initials = (nameOrEmail?: string | null) => {
-    if (!nameOrEmail) return "?";
-    const parts = nameOrEmail.split(" ");
-    if (parts.length === 1) return parts[0][0]?.toUpperCase() ?? "?";
-    return (parts[0][0] + parts[1][0]).toUpperCase();
-  };
+  const sortedMembers = useMemo(() => {
+    if (!currentUser) return members;
 
-  /* ------------ AUTO-JOIN / LEAVE VOICE BASED ON URL ------------ */
+    const getSortKey = (user: TeamMember["user"]) => {
+      const username = getUserUsername(user);
+      return (user.name || username || user.email || "") as string;
+    };
 
-  useEffect(() => {
-    if (!selectedChannelFromUrl) return;
-    if (selectedChannelFromUrl.type !== "VOICE") return;
-
-    if (joinedChannelId === selectedChannelFromUrl.id) return;
-
-    // Join the voice channel selected in the URL
-    joinChannel(selectedChannelFromUrl.id);
-  }, [selectedChannelFromUrl, joinChannel, joinedChannelId]);
-
-  useEffect(() => {
-    // If channelId is removed from URL and we're in a voice channel, leave
-    if (!channelIdFromUrl && joinedChannelId) {
-      leaveChannel();
-    }
-  }, [channelIdFromUrl, joinedChannelId, leaveChannel]);
+    return [...members].sort((a, b) => {
+      const aIsMe = a.user.id === currentUser.id;
+      const bIsMe = b.user.id === currentUser.id;
+      if (aIsMe && !bIsMe) return -1;
+      if (!aIsMe && bIsMe) return 1;
+      return getSortKey(a.user).localeCompare(getSortKey(b.user));
+    });
+  }, [members, currentUser]);
 
   /* ------------ RENDER ------------ */
 
@@ -209,332 +103,229 @@ export default function TeamDetailPanel({ teamId }: Props) {
     <Box
       sx={{
         flex: 1,
-        background: "radial-gradient(circle at top, #020617, #020617)",
+        minHeight: 0,
+        height: "100%", // 👈 now fills the flex column from DashboardShell
+        borderRadius: "18px",
+        border: "1px solid rgba(15,23,42,0.9)",
+        background:
+          "radial-gradient(circle at top, rgba(12,148,136,0.12), var(--color-bg-dark))",
+        boxShadow: "0 18px 40px rgba(0,0,0,0.85)",
+        padding: { xs: 2.25, md: 2.75, lg: 3 },
+        display: "flex",
+        flexDirection: { xs: "column", lg: "row" },
+        gap: { xs: 2, md: 2.5, lg: 3 },
       }}
-      className="p-4 space-y-4"
     >
-      {/* Header */}
-      <Box className="flex items-center justify-between">
-        <Box className="flex items-center gap-2">
-          <Users2 className="h-4 w-4 text-primary-300" />
-          <Typography className="text-bglight uppercase tracking-[0.18em] text-xs">
-            {loadingTeam ? "Loading team…" : team?.name || "Team"}
-          </Typography>
-        </Box>
+      {/* LEFT: main team canvas */}
+      <Box
+        sx={{
+          flex: 1,
+          minWidth: 0,
+          borderRadius: "16px",
+          display: "flex",
+          flexDirection: "column",
+          gap: 1.25,
+          minHeight: 0,
+        }}
+      >
+        <TeamVoiceStrip />
 
-        <Box className="flex items-center gap-2">
-          {connecting && (
-            <Typography className="text-[11px] text-graybrand-400">
-              Connecting…
-            </Typography>
-          )}
-          {error && (
-            <Typography className="text-[11px] text-red-400">
-              {error}
-            </Typography>
-          )}
+        <Box sx={{ flex: 1, minHeight: 0 }}>
+          <TeamChatPanel />
         </Box>
       </Box>
 
-      <Divider className="border-white/10" />
-
+      {/* RIGHT: members column (sidebar-like) */}
       <Box
-        className="
-          grid gap-4
-          xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]
-        "
+        sx={{
+          width: { xs: "100%", lg: 280, xl: 320 },
+          flexShrink: 0,
+          borderRadius: "16px",
+          border: "1px solid rgba(55,65,81,0.9)",
+          backgroundColor: "var(--color-gray-900)",
+          display: "flex",
+          flexDirection: "column",
+          px: 1.25,
+          py: 1.25,
+          maxHeight: { xs: 360, md: 420, lg: "none" },
+        }}
       >
-        {/* Members column */}
+        {/* Members header row */}
         <Box
-          className="
-            rounded-2xl border border-white/10
-            bg-black/25 p-3 space-y-3
-          "
+          sx={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            mb: 1,
+            gap: 1,
+          }}
         >
-          <Box className="flex items-center justify-between">
-            <Typography className="text-[11px] text-graybrand-200 uppercase tracking-[0.18em]">
+          <Box sx={{ display: "flex", alignItems: "center", gap: 0.75 }}>
+            <Typography
+              sx={{
+                fontSize: 11,
+                textTransform: "uppercase",
+                letterSpacing: "0.18em",
+                color: "var(--color-gray-300)",
+              }}
+            >
               Members
             </Typography>
-            {loadingMembers && (
-              <CircularProgress size={14} sx={{ color: "#38bdf8" }} />
+
+            {memberCount > 0 && (
+              <Box
+                sx={{
+                  fontSize: 10,
+                  px: 0.75,
+                  py: 0.25,
+                  borderRadius: "999px",
+                  backgroundColor: "rgba(15,23,42,0.9)",
+                  color: "var(--color-gray-200)",
+                  border: "1px solid rgba(75,85,99,0.9)",
+                }}
+              >
+                {memberCount}
+              </Box>
             )}
           </Box>
 
-          <Box className="space-y-2 max-h-[380px] overflow-y-auto pr-1">
-            {members.map((m) => (
-              <Box
-                key={m.id}
-                className="
-                  flex items-center justify-between gap-2
-                  text-xs text-graybrand-100
-                  rounded-xl px-2 py-1.5
-                  bg-white/5
-                "
-              >
-                <Box className="flex items-center gap-2">
-                  <Avatar
-                    sx={{
-                      width: 24,
-                      height: 24,
-                      bgcolor: "rgba(56,189,248,0.18)",
-                      fontSize: 11,
-                    }}
-                  >
-                    {initialsFromMember(m)}
-                  </Avatar>
-                  <Box className="flex flex-col">
-                    <span>{m.user.name || m.user.email}</span>
-                    <span className="text-[10px] text-graybrand-400">
-                      {m.user.email}
-                    </span>
-                  </Box>
-                </Box>
-                {m.role && (
-                  <span className="text-[10px] text-graybrand-400 uppercase">
-                    {m.role.name}
-                  </span>
-                )}
-              </Box>
-            ))}
-            {!loadingMembers && members.length === 0 && (
-              <Typography className="text-[11px] text-graybrand-400">
-                No members yet. Use “Add member” in the sidebar.
-              </Typography>
-            )}
-          </Box>
+          {loadingMembers && (
+            <CircularProgress
+              size={16}
+              sx={{ color: "var(--color-primary-400)" }}
+            />
+          )}
         </Box>
 
-        {/* Servers + channels */}
-        <Box className="space-y-3">
-          {/* Servers */}
-          <Box
-            className="
-              rounded-2xl border border-white/10
-              bg-black/25 p-3 space-y-2
-            "
-          >
-            <Box className="flex items-center justify-between">
-              <Typography className="text-[11px] text-graybrand-200 uppercase tracking-[0.18em]">
-                Servers
-              </Typography>
-              {loadingServers && (
-                <CircularProgress size={14} sx={{ color: "#38bdf8" }} />
-              )}
-            </Box>
+        {/* Members list */}
+        <Box
+          sx={{
+            flex: 1,
+            minHeight: 0,
+            overflowY: "auto",
+            pr: 0.5,
+            display: "flex",
+            flexDirection: "column",
+            gap: 0.5,
+          }}
+        >
+          {sortedMembers.map((m) => {
+            const isMe = currentUser && m.user.id === currentUser.id;
+            const avatarSrc = getUserAvatarUrl(m.user) || undefined;
+            const username = getUserUsername(m.user);
+            const displayName =
+              m.user.name || username || m.user.email;
+            const subline = username
+              ? `@${username} • ${m.user.email}`
+              : m.user.email;
 
-            <Box className="flex flex-wrap gap-2">
-              {servers.map((server) => {
-                const active = server.id === selectedServerId;
-                const isVoiceServer = server.type === "VOICE";
-
-                return (
-                  <button
-                    key={server.id}
-                    type="button"
-                    onClick={() => setSelectedServerId(server.id)}
-                    className={`
-                      flex items-center gap-2 text-[11px]
-                      rounded-xl px-3 py-1.5
-                      border transition
-                      ${
-                        active
-                          ? "bg-primary-500/20 border-primary-400/80 text-bglight"
-                          : "bg-white/5 border-transparent text-graybrand-200 hover:bg-white/10 hover:border-white/10"
-                      }
-                    `}
+            return (
+              <Box
+                key={m.id}
+                sx={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: 1,
+                  borderRadius: "12px",
+                  px: 1,
+                  py: 0.65,
+                  backgroundColor: isMe
+                    ? "rgba(108,207,246,0.12)"
+                    : "rgba(15,23,42,0.9)",
+                  border: isMe
+                    ? "1px solid var(--color-primary-500)"
+                    : "1px solid rgba(55,65,81,0.9)",
+                }}
+              >
+                <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                  <Avatar
+                    src={avatarSrc}
+                    alt={displayName || "Member"}
+                    sx={{
+                      width: 26,
+                      height: 26,
+                      borderRadius: "999px",
+                      bgcolor: "rgba(108,207,246,0.22)",
+                      fontSize: 11,
+                      color: "var(--color-primary-50)",
+                    }}
                   >
-                    <ServerIcon className="h-3.5 w-3.5 text-primary-300" />
-                    <span>{server.name}</span>
-                    <span className="text-[9px] text-graybrand-400 uppercase">
-                      {isVoiceServer ? "Voice" : "Text"}
-                    </span>
-                  </button>
-                );
-              })}
-              {!loadingServers && servers.length === 0 && (
-                <Typography className="text-[11px] text-graybrand-400">
-                  No servers yet for this team.
-                </Typography>
-              )}
-            </Box>
-          </Box>
-
-          {/* Channels + create forms */}
-          <Box
-            className="
-              rounded-2xl border border-white/10
-              bg-black/20 p-3 space-y-3
-            "
-          >
-            <Box className="flex items-center justify-between">
-              <Typography className="text-[11px] text-graybrand-200 uppercase tracking-[0.18em]">
-                Channels
-              </Typography>
-              {loadingChannels && selectedServerId && (
-                <CircularProgress size={14} sx={{ color: "#38bdf8" }} />
-              )}
-            </Box>
-
-            {!selectedServerId && servers.length > 0 && (
-              <Typography className="text-[11px] text-graybrand-400 mb-1">
-                Select a server above to see and create channels.
-              </Typography>
-            )}
-
-            <Box className="grid gap-4 md:grid-cols-2">
-              {/* Text channels */}
-              <Box className="space-y-1.5">
-                <Typography className="text-[10px] text-graybrand-400 uppercase tracking-[0.2em]">
-                  Text Channels
-                </Typography>
-                <Box className="space-y-1 max-h-[160px] overflow-y-auto pr-1">
-                  {textChannels.map((ch) => {
-                    const isSelected = ch.id === channelIdFromUrl;
-                    return (
-                      <Box
-                        key={ch.id}
-                        className="
-                          flex items-center gap-2 text-xs
-                          rounded-xl px-2 py-1.5
-                        "
-                        style={{
-                          backgroundColor: isSelected
-                            ? "rgba(56,189,248,0.12)"
-                            : "rgba(255,255,255,0.05)",
-                          border: isSelected
-                            ? "1px solid rgba(56,189,248,0.7)"
-                            : "1px solid transparent",
-                          transition:
-                            "background-color 120ms ease, border-color 120ms ease",
-                          color: "#e5e7eb",
-                        }}
-                      >
-                        <Hash className="h-3 w-3 text-primary-300" />
-                        <span>{ch.name}</span>
-                      </Box>
-                    );
-                  })}
-                  {!loadingChannels &&
-                    selectedServerId &&
-                    textChannels.length === 0 && (
-                      <Typography className="text-[10px] text-graybrand-500">
-                        No text channels yet.
-                      </Typography>
-                    )}
-                </Box>
-              </Box>
-
-              {/* Voice channels */}
-              <Box className="space-y-1.5">
-                <Typography className="text-[10px] text-graybrand-400 uppercase tracking-[0.2em]">
-                  Voice Channels
-                </Typography>
-                <Box className="space-y-2 max-h-[200px] overflow-y-auto pr-1">
-                  {voiceChannels.map((ch) => {
-                    const joined = joinedChannelId === ch.id;
-                    const isSelected = ch.id === channelIdFromUrl;
-                    const channelPeers = joined ? peers : [];
-
-                    return (
-                      <Box
-                        key={ch.id}
-                        className="space-y-1.5 rounded-xl px-2 py-1.5"
-                        style={{
-                          backgroundColor: isSelected
-                            ? "rgba(56,189,248,0.12)"
-                            : "rgba(255,255,255,0.05)",
-                          border: isSelected
-                            ? "1px solid rgba(56,189,248,0.7)"
-                            : "1px solid transparent",
-                          transition:
-                            "background-color 120ms ease, border-color 120ms ease",
-                        }}
-                      >
-                        {/* Join / leave */}
-                        <button
-                          type="button"
-                          className="
-                            w-full flex items-center justify-between gap-2
-                            text-xs
-                            hover:bg-white/10 rounded-lg px-1.5 py-1
-                          "
-                          onClick={() =>
-                            joined ? leaveChannel() : joinChannel(ch.id)
-                          }
+                    {!avatarSrc && initialsFromMember(m)}
+                  </Avatar>
+                  <Box sx={{ minWidth: 0 }}>
+                    <Typography
+                      sx={{
+                        fontSize: 12,
+                        color: "var(--color-gray-50)",
+                        maxWidth: 160,
+                        whiteSpace: "nowrap",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                      }}
+                    >
+                      {displayName}
+                      {isMe && (
+                        <span
+                          style={{
+                            fontSize: 10,
+                            marginLeft: 6,
+                            color: "var(--color-primary-300)",
+                          }}
                         >
-                          <span className="flex items-center gap-2">
-                            <Mic2 className="h-3 w-3 text-primary-300" />
-                            <span>{ch.name}</span>
-                          </span>
-                          <span className="text-[9px] text-graybrand-400 uppercase">
-                            {joined ? "Leave" : "Join"}
-                          </span>
-                        </button>
-
-                        {/* Occupants */}
-                        {joined && (
-  <Box className="flex flex-wrap gap-1 pl-1 items-center mt-1">
-    {/* Local user */}
-    {currentUser && localStream && (
-      <SpeakingAvatar
-        stream={localStream}
-        nameOrEmail={currentUser.name || currentUser.email || "You"}
-        tooltipLabel="You"
-        playAudio={false}      // 👈 prevent self-echo
-      />
-    )}
-
-    {/* Remote peers – playback ON */}
-    {channelPeers.map((peer) =>
-      peer.stream ? (
-        <SpeakingAvatar
-          key={peer.socketId}
-          stream={peer.stream}
-          nameOrEmail={peer.userId || "Peer"}
-          tooltipLabel={peer.userId || peer.socketId}
-          playAudio={true}
-        />
-      ) : null
-    )}
-
-    <Typography className="text-[10px] text-graybrand-300 ml-1">
-      {1 + channelPeers.length} in channel
-    </Typography>
-  </Box>
-)}
-                      </Box>
-                    );
-                  })}
-                  {!loadingChannels &&
-                    selectedServerId &&
-                    voiceChannels.length === 0 && (
-                      <Typography className="text-[10px] text-graybrand-500">
-                        No voice channels yet.
-                      </Typography>
-                    )}
+                          · you
+                        </span>
+                      )}
+                    </Typography>
+                    <Typography
+                      sx={{
+                        fontSize: 10,
+                        color: "var(--color-gray-400)",
+                        maxWidth: 180,
+                        whiteSpace: "nowrap",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                      }}
+                    >
+                      {subline}
+                    </Typography>
+                  </Box>
                 </Box>
-              </Box>
-            </Box>
 
-            {/* Create channels */}
-            <Divider className="border-white/10" />
-            <Box className="grid gap-3 md:grid-cols-2">
-              <CreateChannelForm
-                serverId={selectedServerId}
-                defaultType="VOICE"
-                onChannelCreated={() => {
-                  if (selectedServerId) loadChannels(selectedServerId);
-                }}
-              />
-              <CreateChannelForm
-                serverId={selectedServerId}
-                defaultType="TEXT"
-                onChannelCreated={() => {
-                  if (selectedServerId) loadChannels(selectedServerId);
-                }}
-              />
-            </Box>
-          </Box>
+                {m.role && (
+                  <Box
+                    sx={{
+                      ml: 0.5,
+                      px: 0.75,
+                      py: 0.25,
+                      borderRadius: "999px",
+                      fontSize: 9,
+                      textTransform: "uppercase",
+                      letterSpacing: "0.12em",
+                      whiteSpace: "nowrap",
+                      backgroundColor: "rgba(152,206,0,0.12)",
+                      color: "var(--color-accent-300)",
+                      border: "1px solid rgba(152,206,0,0.65)",
+                    }}
+                  >
+                    {m.role.name}
+                  </Box>
+                )}
+              </Box>
+            );
+          })}
+
+          {!loadingMembers && members.length === 0 && (
+            <Typography
+              sx={{
+                fontSize: 11,
+                color: "var(--color-gray-400)",
+                mt: 0.5,
+              }}
+            >
+              No members yet. Use “Add member” in the sidebar.
+            </Typography>
+          )}
         </Box>
       </Box>
     </Box>

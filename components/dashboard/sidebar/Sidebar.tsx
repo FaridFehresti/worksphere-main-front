@@ -1,11 +1,10 @@
-// components/Sidebar.tsx
 "use client";
 
 import { Box } from "@mui/material";
 import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 
-import { useUserStore } from "@/lib/store/user";
+import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
 import { useLogout } from "@/lib/logout";
 
 import { fetchMyTeams, Team } from "@/lib/api/teams";
@@ -26,7 +25,7 @@ import AddMemberDialog from "../AddMemberDialog";
 import CreateServerDialog from "../CreateServerDialog";
 
 export default function Sidebar() {
-  const user = useUserStore((s) => s.user);
+  useCurrentUser();
   const logout = useLogout();
 
   const router = useRouter();
@@ -36,12 +35,12 @@ export default function Sidebar() {
   const [createTeamOpen, setCreateTeamOpen] = useState(false);
   const [addMemberOpen, setAddMemberOpen] = useState(false);
   const [addMemberTeamId, setAddMemberTeamId] = useState<string | null>(null);
-  const [addMemberTeamName, setAddMemberTeamName] = useState<
-    string | undefined
-  >(undefined);
+  const [addMemberTeamName, setAddMemberTeamName] = useState<string | undefined>(
+    undefined,
+  );
   const [createServerOpen, setCreateServerOpen] = useState(false);
   const [createServerTeamId, setCreateServerTeamId] = useState<string | null>(
-    null
+    null,
   );
 
   // data
@@ -67,7 +66,6 @@ export default function Sidebar() {
   const getActiveTeamIdFromPath = (): string | null => {
     if (!pathname) return null;
     const parts = pathname.split("/");
-    // /dashboard/teams/[teamId]/...
     if (parts[1] === "dashboard" && parts[2] === "teams" && parts[3]) {
       return parts[3];
     }
@@ -158,7 +156,7 @@ export default function Sidebar() {
 
   const handleChannelClick = (server: ServerType, channel: Channel) => {
     router.push(
-      `/dashboard/teams/${server.teamId}?serverId=${server.id}&channelId=${channel.id}`
+      `/dashboard/teams/${server.teamId}?serverId=${server.id}&channelId=${channel.id}`,
     );
   };
 
@@ -182,30 +180,54 @@ export default function Sidebar() {
 
   return (
     <>
+      {/* Sidebar wrapper – responsive */}
       <Box
         sx={{
-          width: 380,
-          height: "100vh",
+          width: { xs: "100%", lg: 420, xl: 460 }, // 👈 wider on desktop
+          height: { xs: "auto", lg: "100vh" },
+          maxHeight: { xs: "min(560px, 100vh)", lg: "100vh" },
           backgroundColor: "var(--color-bg-dark)",
-          borderRight: "1px solid rgba(255,255,255,0.05)",
+          borderRight: {
+            xs: "none",
+            lg: "1px solid rgba(255,255,255,0.05)",
+          },
+          borderBottom: {
+            xs: "1px solid rgba(255,255,255,0.05)",
+            lg: "none",
+          },
           display: "flex",
           flexDirection: "column",
+          flexShrink: 0,
         }}
       >
-        <Box sx={{ display: "flex", flex: 1, minHeight: 0 }}>
-          {/* Left: Team rail */}
-          <TeamRail
-            teams={teams}
-            activeTeamId={activeTeamId}
-            loadingTeams={loadingTeams}
-            onTeamClick={handleTeamClick}
-            onCreateTeamClick={() => setCreateTeamOpen(true)}
-          />
+        <Box
+          sx={{
+            display: "flex",
+            flex: 1,
+            minHeight: 0,
+          }}
+        >
+          {/* Left: Team rail (slightly wider) */}
+          <Box
+            sx={{
+              width: 76,
+              flexShrink: 0,
+            }}
+          >
+            <TeamRail
+              teams={teams}
+              activeTeamId={activeTeamId}
+              loadingTeams={loadingTeams}
+              onTeamClick={handleTeamClick}
+              onCreateTeamClick={() => setCreateTeamOpen(true)}
+            />
+          </Box>
 
-          {/* Right: Servers + channels */}
+          {/* Right: servers + channels */}
           <Box
             sx={{
               flex: 1,
+              minWidth: 0, // 👈 prevents weird wrapping in server panel
               display: "flex",
               flexDirection: "column",
               borderLeft: "1px solid rgba(255,255,255,0.03)",
@@ -225,28 +247,35 @@ export default function Sidebar() {
               onOpenAddMember={handleOpenAddMember}
             />
 
-            <Box sx={{ marginTop: "auto", padding: "8px 12px 10px" }}>
+            {/* User bar pinned to bottom */}
+            <Box
+              sx={{
+                mt: "auto",
+                px: 1.5,
+                pb: 1.25,
+                pt: 0.75,
+                borderTop: "1px solid rgba(15,23,42,0.92)",
+                backgroundColor: "var(--color-bg-dark)",
+              }}
+            >
               <UserStatusBar />
             </Box>
           </Box>
         </Box>
       </Box>
 
+      {/* Dialogs */}
       <CreateTeamDialog
         open={createTeamOpen}
         onClose={() => setCreateTeamOpen(false)}
-        onTeamCreated={() => {
-          loadTeams();
-        }}
+        onTeamCreated={loadTeams}
       />
-
       <AddMemberDialog
         open={addMemberOpen}
         onClose={handleCloseAddMember}
         teamId={addMemberTeamId}
         teamName={addMemberTeamName}
       />
-
       <CreateServerDialog
         open={createServerOpen}
         onClose={handleCloseCreateServer}

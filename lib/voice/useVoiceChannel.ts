@@ -20,8 +20,19 @@ const peerConnections = new Map<string, RTCPeerConnection>();
 // ICE candidates queued until we have a remoteDescription
 const pendingCandidates = new Map<string, RTCIceCandidateInit[]>();
 
-// Local mic stream (if we have one)
+// Local mic processed stream (what we send to peers + show in UI)
 let myStream: MediaStream | null = null;
+
+// Raw mic stream (direct from getUserMedia)
+let rawMicStream: MediaStream | null = null;
+
+// Web Audio pipeline for input volume control
+let micAudioContext: AudioContext | null = null;
+let micGainNode: GainNode | null = null;
+let micSourceNode: MediaStreamAudioSourceNode | null = null;
+
+// Ping monitor
+let pingIntervalId: number | null = null;
 
 type SignalType = "offer" | "answer" | "ice-candidate";
 
@@ -48,10 +59,18 @@ type PeerLeftEvent = {
   socketId: string;
 };
 
+type PeerAudioStateEvent = {
+  socketId: string;
+  micMuted: boolean;
+  deafened: boolean;
+};
+
 export type VoicePeer = {
   socketId: string;
   userId?: string;
   stream?: MediaStream;
+  micMuted?: boolean;
+  deafened?: boolean;
 };
 
 /* ------------------------------------------------------------------ */
@@ -64,6 +83,7 @@ type VoiceState = {
   connecting: boolean;
   error: string | null;
   localStream: MediaStream | null;
+  pingMs: number | null;
 };
 
 let voiceState: VoiceState = {
@@ -72,6 +92,7 @@ let voiceState: VoiceState = {
   connecting: false,
   error: null,
   localStream: null,
+  pingMs: null,
 };
 
 type Subscriber = (state: VoiceState) => void;
@@ -83,13 +104,103 @@ function notify(updater: (prev: VoiceState) => VoiceState) {
 }
 
 /* ------------------------------------------------------------------ */
+/*  Ping monitor helpers (WebRTC getStats)                            */
+/* ------------------------------------------------------------------ */
+
+async function measurePingOnce() {
+  if (!voiceState.joinedChannelId || peerConnections.size === 0) {
+    // Not in a channel or no peers -> no ping
+    notify((prev) => ({ ...prev, pingMs: null }));
+    return;
+  }
+
+  // Take the first peer connection
+  const firstEntry = peerConnections.values().next();
+  if (firstEntry.done) {
+    notify((prev) => ({ ...prev, pingMs: null }));
+    return;
+  }
+  const pc = firstEntry.value as RTCPeerConnection;
+  if (!pc) {
+    notify((prev) => ({ ...prev, pingMs: null }));
+    return;
+  }
+
+  try {
+    const stats = await pc.getStats();
+    let bestRttMs: number | null = null;
+
+    stats.forEach((report: any) => {
+      // candidate-pair is where currentRoundTripTime usually lives
+      if (
+        report.type === "candidate-pair" &&
+        (report.selected || report.state === "succeeded") &&
+        typeof report.currentRoundTripTime === "number"
+      ) {
+        const rttMs = report.currentRoundTripTime * 1000; // seconds -> ms
+        if (bestRttMs == null || rttMs < bestRttMs) {
+          bestRttMs = rttMs;
+        }
+      }
+
+      // Fallback: remote-inbound-rtp.roundTripTime
+      if (
+        report.type === "remote-inbound-rtp" &&
+        typeof report.roundTripTime === "number"
+      ) {
+        const rttMs = report.roundTripTime * 1000;
+        if (bestRttMs == null || rttMs < bestRttMs) {
+          bestRttMs = rttMs;
+        }
+      }
+    });
+
+    notify((prev) => ({
+      ...prev,
+      pingMs: bestRttMs ?? null,
+    }));
+  } catch (err) {
+    console.warn("[voice-hook] ping measurement failed", err);
+  }
+}
+
+function startPingMonitor() {
+  if (typeof window === "undefined") return;
+  if (pingIntervalId != null) return;
+
+  console.log("[voice-hook] starting ping monitor");
+  pingIntervalId = window.setInterval(() => {
+    void measurePingOnce();
+  }, 3000);
+}
+
+function stopPingMonitor() {
+  if (pingIntervalId != null) {
+    console.log("[voice-hook] stopping ping monitor");
+    window.clearInterval(pingIntervalId);
+    pingIntervalId = null;
+  }
+
+  notify((prev) => ({
+    ...prev,
+    pingMs: null,
+  }));
+}
+
+/* ------------------------------------------------------------------ */
 /*  Hook                                                              */
 /* ------------------------------------------------------------------ */
 
 export function useVoiceChannel() {
   console.log("[voice-hook] useVoiceChannel init");
 
-  const { inputDeviceId, outputVolume } = useAudioStore();
+  const {
+    inputDeviceId,
+    inputVolume,
+    outputVolume,
+    micMuted,
+    deafened,
+  } = useAudioStore();
 
   // Local React state mirrors the global voiceState
   const [state, setState] = useState<VoiceState>(voiceState);
@@ -107,11 +218,27 @@ export function useVoiceChannel() {
   /* ------------ helpers: local media ------------ */
 
   const stopLocalStream = useCallback(() => {
+    console.log("[voice-hook] stopLocalStream");
+
     if (myStream) {
-      console.log("[voice-hook] stopLocalStream");
       myStream.getTracks().forEach((t) => t.stop());
       myStream = null;
     }
+
+    if (rawMicStream) {
+      rawMicStream.getTracks().forEach((t) => t.stop());
+      rawMicStream = null;
+    }
+
+    if (micAudioContext) {
+      micAudioContext.close().catch(() => {
+        /* ignore */
+      });
+      micAudioContext = null;
+    }
+
+    micGainNode = null;
+    micSourceNode = null;
 
     notify((prev) => ({
       ...prev,
@@ -124,17 +251,51 @@ export function useVoiceChannel() {
 
     console.log("[voice-hook] ensureLocalStream: trying to acquire mic");
 
+    const buildPipeline = async (
+      constraints: MediaStreamConstraints,
+    ): Promise<MediaStream> => {
+      const raw = await navigator.mediaDevices.getUserMedia(constraints);
+      console.log("[voice-hook] ensureLocalStream: got raw mic stream");
+      rawMicStream = raw;
+
+      const audioContext = new AudioContext();
+      const source = audioContext.createMediaStreamSource(raw);
+      const gain = audioContext.createGain();
+      const dest = audioContext.createMediaStreamDestination();
+
+      const vol = typeof inputVolume === "number" ? inputVolume : 100;
+      const effective = micMuted ? 0 : vol;
+      gain.gain.value = effective / 100;
+
+      source.connect(gain);
+      gain.connect(dest);
+
+      micAudioContext = audioContext;
+      micGainNode = gain;
+      micSourceNode = source;
+
+      myStream = dest.stream;
+
+      myStream.getAudioTracks().forEach((t) => {
+        t.enabled = !micMuted;
+      });
+
+      notify((prev) => ({ ...prev, localStream: dest.stream }));
+
+      return dest.stream;
+    };
+
     try {
       if (inputDeviceId) {
         try {
-          const stream = await navigator.mediaDevices.getUserMedia({
-            audio: { deviceId: { exact: inputDeviceId } },
-          });
           console.log(
-            "[voice-hook] ensureLocalStream: got stream with selected device",
+            "[voice-hook] ensureLocalStream: using selected input device",
+            inputDeviceId,
           );
-          myStream = stream;
-          notify((prev) => ({ ...prev, localStream: stream }));
+          const stream = await buildPipeline({
+            audio: { deviceId: { exact: inputDeviceId } },
+            video: false,
+          });
           return stream;
         } catch (err) {
           console.warn(
@@ -145,10 +306,8 @@ export function useVoiceChannel() {
       }
 
       console.log("[voice-hook] retrying getUserMedia with default device");
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const stream = await buildPipeline({ audio: true, video: false });
       console.log("[voice-hook] ensureLocalStream: got fallback stream");
-      myStream = stream;
-      notify((prev) => ({ ...prev, localStream: stream }));
       return stream;
     } catch (err) {
       console.warn(
@@ -157,7 +316,29 @@ export function useVoiceChannel() {
       );
       return null;
     }
-  }, [inputDeviceId]);
+  }, [inputDeviceId, inputVolume, micMuted]);
+
+  // When inputVolume or micMuted changes, update gain
+  useEffect(() => {
+    if (!micGainNode) return;
+    const vol = typeof inputVolume === "number" ? inputVolume : 100;
+    const effective = micMuted ? 0 : vol;
+    micGainNode.gain.value = effective / 100;
+    console.log(
+      "[voice-hook] updated mic gain from inputVolume / micMuted:",
+      vol,
+      "muted?",
+      micMuted,
+    );
+  }, [inputVolume, micMuted]);
+
+  // Keep track.enabled in sync with micMuted as well
+  useEffect(() => {
+    if (!myStream) return;
+    myStream.getAudioTracks().forEach((t) => {
+      t.enabled = !micMuted;
+    });
+  }, [micMuted]);
 
   /* ------------ helpers: peers / PCs ------------ */
 
@@ -180,6 +361,11 @@ export function useVoiceChannel() {
       delete nextPeers[socketId];
       return { ...prev, peers: nextPeers };
     });
+
+    // If no more peers, we can stop ping monitor
+    if (peerConnections.size === 0) {
+      stopPingMonitor();
+    }
   }, []);
 
   const leaveCurrentChannel = useCallback(() => {
@@ -196,12 +382,14 @@ export function useVoiceChannel() {
     peerConnections.clear();
     pendingCandidates.clear();
     stopLocalStream();
+    stopPingMonitor();
 
     notify((prev) => ({
       ...prev,
       joinedChannelId: null,
       peers: {},
       connecting: false,
+      pingMs: null,
     }));
   }, [cleanupPeer, stopLocalStream]);
 
@@ -234,6 +422,7 @@ export function useVoiceChannel() {
           },
         ],
       });
+
       pc.oniceconnectionstatechange = () => {
         console.log(
           "[webrtc] iceConnectionState for",
@@ -288,9 +477,15 @@ export function useVoiceChannel() {
         ...prev,
         peers: {
           ...prev.peers,
-          [peerSocketId]: prev.peers[peerSocketId] ?? { socketId: peerSocketId },
+          [peerSocketId]:
+            prev.peers[peerSocketId] ?? { socketId: peerSocketId },
         },
       }));
+
+      // Once we have at least one peer connection and are in a channel, start ping monitor
+      if (voiceState.joinedChannelId) {
+        startPingMonitor();
+      }
 
       if (isInitiator) {
         const offer = await pc.createOffer();
@@ -342,14 +537,25 @@ export function useVoiceChannel() {
 
       socket.on("disconnect", (reason) => {
         console.log("[voice] socket disconnected", reason);
+        // When global socket drops, we effectively lose voice channel
+        stopPingMonitor();
+        notify((prev) => ({
+          ...prev,
+          joinedChannelId: null,
+          connecting: false,
+          pingMs: null,
+        }));
       });
 
       socket.on("connect_error", (err) => {
         console.error("[voice] connect_error", err);
+        stopPingMonitor();
         notify((prev) => ({
           ...prev,
           error: err.message || "Voice connection failed",
           connecting: false,
+          joinedChannelId: null,
+          pingMs: null,
         }));
       });
 
@@ -363,6 +569,9 @@ export function useVoiceChannel() {
           error: null,
         }));
 
+        // Start ping monitor once we are in a channel
+        startPingMonitor();
+
         for (const peerId of event.existingPeers) {
           await createPeerConnection(peerId, true);
         }
@@ -373,7 +582,10 @@ export function useVoiceChannel() {
 
         const { channelId, socketId, userId } = event;
 
-        if (!voiceState.joinedChannelId || voiceState.joinedChannelId !== channelId) {
+        if (
+          !voiceState.joinedChannelId ||
+          voiceState.joinedChannelId !== channelId
+        ) {
           return;
         }
 
@@ -396,6 +608,24 @@ export function useVoiceChannel() {
       socket.on("peer-left", (event: PeerLeftEvent) => {
         console.log("[voice] peer-left", event);
         cleanupPeer(event.socketId);
+      });
+
+      // 🔊 peer audio state updates
+      socket.on("peer-audio-state", (event: PeerAudioStateEvent) => {
+        console.log("[voice] peer-audio-state", event);
+        const { socketId, micMuted, deafened } = event;
+
+        notify((prev) => ({
+          ...prev,
+          peers: {
+            ...prev.peers,
+            [socketId]: {
+              ...(prev.peers[socketId] ?? { socketId }),
+              micMuted,
+              deafened,
+            },
+          },
+        }));
       });
 
       socket.on("signal", async ({ fromSocketId, type, data }: SignalEvent) => {
@@ -546,11 +776,13 @@ export function useVoiceChannel() {
 
       socket.on("exception", (err: any) => {
         console.error("[voice] exception from server", err);
+        stopPingMonitor();
         notify((prev) => ({
           ...prev,
           error: err?.message ?? "Voice error",
           joinedChannelId: null,
           connecting: false,
+          pingMs: null,
         }));
       });
     }
@@ -567,6 +799,20 @@ export function useVoiceChannel() {
       );
     };
   }, []);
+
+  /* ------------ broadcast our audio state when it changes ------------ */
+
+  useEffect(() => {
+    const socket = socketSingleton;
+    if (!socket) return;
+    if (!voiceState.joinedChannelId) return;
+
+    socket.emit("audio-state", {
+      channelId: voiceState.joinedChannelId,
+      micMuted,
+      deafened,
+    });
+  }, [micMuted, deafened, state.joinedChannelId]);
 
   /* ------------ public API ------------ */
 
@@ -615,5 +861,6 @@ export function useVoiceChannel() {
     leaveChannel,
     localStream: state.localStream,
     outputVolume,
+    pingMs: state.pingMs,
   };
 }

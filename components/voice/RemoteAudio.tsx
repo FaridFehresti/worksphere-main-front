@@ -7,6 +7,7 @@ type RemoteAudioProps = {
   stream?: MediaStream | null;
   muted?: boolean;
   volume?: number; // 0..1 or 0..100, we'll clamp
+  outputDeviceId?: string | null; // 👈 selected output device
   onLevel?: (level: number) => void;
 };
 
@@ -14,15 +15,27 @@ export default function RemoteAudio({
   stream,
   volume = 1,
   muted = false,
+  outputDeviceId,
   onLevel,
 }: RemoteAudioProps) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const rafRef = useRef<number | null>(null);
 
-  // Attach stream + volume + playback
+  // Attach stream + volume + output device + playback
   useEffect(() => {
     const el = audioRef.current;
     if (!el) return;
+
+    // Try to apply output device (setSinkId) if supported
+    if ((el as any).setSinkId) {
+      const sinkId = outputDeviceId || "";
+      (el as any)
+        .setSinkId(sinkId)
+        .catch((err: any) => {
+          // Not supported or permission denied – just log and continue
+          console.warn("[RemoteAudio] setSinkId failed", err);
+        });
+    }
 
     // No stream -> stop and clear
     if (!stream) {
@@ -69,13 +82,14 @@ export default function RemoteAudio({
       el.removeEventListener("canplay", onCanPlay);
       el.pause();
     };
-  }, [stream, muted, volume]);
+  }, [stream, muted, volume, outputDeviceId]);
 
-  // Optional simple level meter
+  // Optional simple level meter via callback
   useEffect(() => {
     if (!onLevel || !stream) return;
 
-    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+    const AudioCtx =
+      window.AudioContext || (window as any).webkitAudioContext;
     if (!AudioCtx) {
       console.warn("[RemoteAudio] WebAudio not supported");
       return;
@@ -94,7 +108,7 @@ export default function RemoteAudio({
       let sum = 0;
       for (let i = 0; i < dataArray.length; i++) sum += dataArray[i];
       const avg = sum / dataArray.length;
-      const level = avg / 255;
+      const level = avg / 255; // 0..1
       onLevel(level);
       rafRef.current = requestAnimationFrame(tick);
     };

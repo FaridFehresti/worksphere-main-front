@@ -1,3 +1,4 @@
+// lib/api/endpoints.ts
 const BASE_URL: string =
   process.env.NEXT_APP_BASE_URL || "https://faridtech.org/api";
 
@@ -5,7 +6,28 @@ export const API_ENDPOINT = {
   auth: {
     login: `${BASE_URL}/auth/login`,
     register: `${BASE_URL}/auth/register`,
-    me: `${BASE_URL}/auth/me`,
+
+    // full "me" payload (same shape as /users/me now)
+    me: `${BASE_URL}/users/me`,
+
+    // password reset flow
+    forgotPassword: `${BASE_URL}/auth/forgot-password`,
+    resetPassword: `${BASE_URL}/auth/reset-password`,
+  },
+
+  // user profile & avatar
+  users: {
+    // GET full profile (same shape as auth.me)
+    me: `${BASE_URL}/users/me`,
+
+    // PATCH profile (name, username, timezone, etc.)
+    updateMe: `${BASE_URL}/users/me`,
+
+    // POST multipart/form-data { file } – avatar upload
+    uploadAvatar: `${BASE_URL}/users/me/avatar`,
+
+    // 👇 NEW: fetch arbitrary user by id (for voice peers)
+  byId: (id: string) => `${BASE_URL}/users/by-id/${id}`,  // NEW
   },
 
   teams: {

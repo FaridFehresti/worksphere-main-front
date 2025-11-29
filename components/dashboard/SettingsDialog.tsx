@@ -1,10 +1,10 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react"; // ⬅ add useEffect + useRef
+import { useState, useEffect, useRef } from "react";
 import {
   Box,
   Dialog,
-  IconButton,   
+  IconButton,
   Typography,
   Divider,
   TextField,
@@ -42,19 +42,19 @@ const selectMenuProps = {
   PaperProps: {
     sx: {
       mt: 0.5,
-      backgroundColor: "rgba(15,23,42,0.98)",
-      color: "#e5e7eb",
-      borderRadius: 2,
-      border: "1px solid rgba(148,163,184,0.45)",
-      boxShadow: "0 20px 60px rgba(0,0,0,0.9)",
+      backgroundColor: "var(--color-bg-dark)",
+      color: "var(--color-gray-100)",
+      borderRadius: "8px",
+      border: "1px solid var(--color-gray-800)",
+      boxShadow: "0 20px 40px rgba(0,0,0,0.7)",
       "& .MuiMenuItem-root": {
         fontSize: 13,
       },
       "& .MuiMenuItem-root.Mui-selected": {
-        backgroundColor: "rgba(56,189,248,0.22)",
+        backgroundColor: "var(--color-primary-900)",
       },
       "& .MuiMenuItem-root:hover": {
-        backgroundColor: "rgba(148,163,184,0.22)",
+        backgroundColor: "var(--color-gray-800)",
       },
     },
   },
@@ -75,10 +75,9 @@ export default function SettingsDialog({ open, onClose }: SettingsDialogProps) {
       maxWidth="md"
       PaperProps={{
         sx: {
-          background:
-            "radial-gradient(circle at top, rgba(15,23,42,0.95), rgba(2,6,23,0.98))",
-          borderRadius: 3,
-          border: "1px solid rgba(148,163,184,0.45)",
+          backgroundColor: "var(--color-bg-dark)",
+          borderRadius: "10px",
+          border: "1px solid var(--color-gray-800)",
           boxShadow: "0 40px 120px rgba(0,0,0,0.9)",
           overflow: "hidden",
         },
@@ -92,8 +91,8 @@ export default function SettingsDialog({ open, onClose }: SettingsDialogProps) {
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
-          borderBottom: "1px solid rgba(148,163,184,0.35)",
-          bgcolor: "rgba(15,23,42,0.8)",
+          borderBottom: "1px solid var(--color-gray-800)",
+          backgroundColor: "var(--color-gray-900)",
         }}
       >
         <Box className="flex items-center gap-2">
@@ -109,8 +108,12 @@ export default function SettingsDialog({ open, onClose }: SettingsDialogProps) {
           size="small"
           onClick={handleClose}
           sx={{
-            color: "rgba(148,163,184,0.9)",
-            "&:hover": { color: "#e5e7eb", bgcolor: "rgba(15,23,42,0.6)" },
+            color: "var(--color-gray-300)",
+            "&:hover": {
+              color: "var(--color-gray-50)",
+              backgroundColor: "var(--color-gray-800)",
+            },
+            borderRadius: "6px",
           }}
         >
           <X className="h-4 w-4" />
@@ -129,13 +132,13 @@ export default function SettingsDialog({ open, onClose }: SettingsDialogProps) {
           sx={{
             borderRight: {
               xs: "none",
-              md: "1px solid rgba(148,163,184,0.25)",
+              md: "1px solid var(--color-gray-800)",
             },
             borderBottom: {
-              xs: "1px solid rgba(148,163,184,0.25)",
+              xs: "1px solid var(--color-gray-800)",
               md: "none",
             },
-            bgcolor: "rgba(15,23,42,0.92)",
+            backgroundColor: "var(--color-gray-900)",
             p: 2,
             display: "flex",
             flexDirection: { xs: "row", md: "column" },
@@ -152,17 +155,17 @@ export default function SettingsDialog({ open, onClose }: SettingsDialogProps) {
                 onClick={() => setActiveTab(tab.id)}
                 className={`
                   flex items-center gap-2
-                  rounded-xl
                   px-3 py-2
                   text-left text-xs
                   whitespace-nowrap
                   transition
-                  ${
-                    active
-                      ? "bg-primary-500/15 border border-primary-400/70 text-bglight"
-                      : "bg-transparent border border-transparent text-graybrand-200 hover:bg-white/5 hover:border-white/10"
+                  border
+                  ${active
+                    ? "bg-primary-500/15 border-primary-400/70 text-bglight"
+                    : "bg-transparent border-transparent text-graybrand-200 hover:bg-gray-800/80 hover:border-gray-700/80"
                   }
                 `}
+                style={{ borderRadius: "6px" }}
               >
                 <span
                   className={active ? "text-primary-300" : "text-graybrand-300"}
@@ -181,7 +184,7 @@ export default function SettingsDialog({ open, onClose }: SettingsDialogProps) {
         <Box
           sx={{
             p: 3,
-            bgcolor: "rgba(15,23,42,0.9)",
+            backgroundColor: "var(--color-gray-900)",
           }}
         >
           {activeTab === "profile" ? <ProfileSettings /> : <AudioVideoSettings />}
@@ -214,7 +217,12 @@ function ProfileSettings() {
         across teams and servers.
       </Typography>
 
-      <Divider className="border-white/10 mb-2" />
+      <Divider
+        sx={{
+          borderColor: "var(--color-gray-800)",
+          mb: 2,
+        }}
+      />
 
       {/* Make it 2-column only on md+ to avoid cramped inputs */}
       <Box className="grid gap-4 md:grid-cols-2">
@@ -227,7 +235,7 @@ function ProfileSettings() {
           InputLabelProps={{ className: "text-graybrand-200" }}
           InputProps={{
             className:
-              "text-bglight bg-white/5 rounded-xl [&_.MuiOutlinedInput-notchedOutline]:border-white/20",
+              "text-bglight bg-white/5 rounded-[6px] [&_.MuiOutlinedInput-notchedOutline]:border-gray-700",
           }}
         />
         <TextField
@@ -239,7 +247,7 @@ function ProfileSettings() {
           InputLabelProps={{ className: "text-graybrand-200" }}
           InputProps={{
             className:
-              "text-bglight bg-white/5 rounded-xl [&_.MuiOutlinedInput-notchedOutline]:border-white/20",
+              "text-bglight bg-white/5 rounded-[6px] [&_.MuiOutlinedInput-notchedOutline]:border-gray-700",
           }}
         />
       </Box>
@@ -254,7 +262,7 @@ function ProfileSettings() {
         InputLabelProps={{ className: "text-graybrand-200" }}
         InputProps={{
           className:
-            "text-bglight bg-white/5 rounded-xl [&_.MuiOutlinedInput-notchedOutline]:border-white/20",
+            "text-bglight bg-white/5 rounded-[6px] [&_.MuiOutlinedInput-notchedOutline]:border-gray-700",
         }}
       />
 
@@ -269,7 +277,7 @@ function ProfileSettings() {
           InputLabelProps={{ className: "text-graybrand-200" }}
           InputProps={{
             className:
-              "text-bglight bg-white/5 rounded-xl [&_.MuiOutlinedInput-notchedOutline]:border-white/20",
+              "text-bglight bg-white/5 rounded-[6px] [&_.MuiOutlinedInput-notchedOutline]:border-gray-700",
           }}
           SelectProps={{
             MenuProps: selectMenuProps,
@@ -287,6 +295,9 @@ function ProfileSettings() {
           size="small"
           variant="outlined"
           className="normal-case border-white/30 text-graybrand-100 hover:border-white/60"
+          sx={{
+            borderRadius: "6px",
+          }}
         >
           Reset
         </Button>
@@ -294,6 +305,9 @@ function ProfileSettings() {
           size="small"
           variant="contained"
           className="normal-case bg-primary-500 hover:bg-primary-400 text-bglight"
+          sx={{
+            borderRadius: "6px",
+          }}
         >
           Save changes
         </Button>
@@ -517,8 +531,7 @@ function AudioVideoSettings() {
         // If live monitoring was already enabled, re-create the chain
         if (micMonitoring) {
           const gain = audioContext.createGain();
-          gain.gain.value =
-            (inputVolume / 100) * (outputVolume / 100);
+          gain.gain.value = (inputVolume / 100) * (outputVolume / 100);
           monitorGainRef.current = gain;
           source.connect(gain);
           gain.connect(audioContext.destination);
@@ -541,7 +554,7 @@ function AudioVideoSettings() {
           const rms = Math.sqrt(sum / bufferLength); // 0..~1
           const level = Math.max(
             0,
-            Math.min(100, Math.round(rms * 200)) // scale a bit
+            Math.min(100, Math.round(rms * 200)), // scale a bit
           );
 
           setMicLevel(level);
@@ -598,7 +611,7 @@ function AudioVideoSettings() {
       }
       monitorGainRef.current = null;
     }
-  }, [micMonitoring]);
+  }, [micMonitoring, inputVolume, outputVolume]);
 
   /* -------- update gain when volumes change while monitoring -------- */
   useEffect(() => {
@@ -659,7 +672,7 @@ function AudioVideoSettings() {
     try {
       window.localStorage.setItem(
         AUDIO_SETTINGS_KEY,
-        JSON.stringify(payload)
+        JSON.stringify(payload),
       );
     } catch (err) {
       console.error("Failed to save audio settings", err);
@@ -728,16 +741,26 @@ function AudioVideoSettings() {
         voice channel.
       </Typography>
 
-      <Divider className="border-white/10 mb-2" />
+      <Divider
+        sx={{
+          borderColor: "var(--color-gray-800)",
+          mb: 2,
+        }}
+      />
 
       {/* DEVICES ROW */}
       <Box
         className="
           grid gap-3
           md:grid-cols-3
-          rounded-2xl border border-white/10 bg-black/20
+          border border-white/10
           p-3
         "
+        sx={{
+          borderRadius: "8px",
+          borderColor: "var(--color-gray-800)",
+          backgroundColor: "var(--color-bg-dark)",
+        }}
       >
         {/* Input device */}
         <Box className="space-y-1.5">
@@ -758,7 +781,7 @@ function AudioVideoSettings() {
             }
             InputProps={{
               className:
-                "text-bglight bg-white/5 rounded-xl [&_.MuiOutlinedInput-notchedOutline]:border-white/20",
+                "text-bglight bg-white/5 rounded-[6px] [&_.MuiOutlinedInput-notchedOutline]:border-gray-700",
             }}
             SelectProps={{
               MenuProps: selectMenuProps,
@@ -794,7 +817,7 @@ function AudioVideoSettings() {
             }
             InputProps={{
               className:
-                "text-bglight bg-white/5 rounded-xl [&_.MuiOutlinedInput-notchedOutline]:border-white/20",
+                "text-bglight bg-white/5 rounded-[6px] [&_.MuiOutlinedInput-notchedOutline]:border-gray-700",
             }}
             SelectProps={{
               MenuProps: selectMenuProps,
@@ -830,7 +853,7 @@ function AudioVideoSettings() {
             }
             InputProps={{
               className:
-                "text-bglight bg-white/5 rounded-xl [&_.MuiOutlinedInput-notchedOutline]:border-white/20",
+                "text-bglight bg-white/5 rounded-[6px] [&_.MuiOutlinedInput-notchedOutline]:border-gray-700",
             }}
             SelectProps={{
               MenuProps: selectMenuProps,
@@ -851,11 +874,15 @@ function AudioVideoSettings() {
       {/* CAMERA PREVIEW PLACEHOLDER */}
       <Box
         className="
-          rounded-2xl border border-white/10 bg-black/30
           flex items-center justify-center gap-2
           text-[11px] text-graybrand-300
           py-3
         "
+        sx={{
+          borderRadius: "8px",
+          border: "1px solid var(--color-gray-800)",
+          backgroundColor: "var(--color-bg-dark)",
+        }}
       >
         <Video className="h-3.5 w-3.5 text-primary-300" />
         Preview coming soon
@@ -866,9 +893,15 @@ function AudioVideoSettings() {
         {/* Mic volume + level meter + live test */}
         <Box
           className="
-            space-y-1.5 rounded-2xl border border-white/10
-            bg-black/20 p-3
+            space-y-1.5
+            border border-white/10
+            p-3
           "
+          sx={{
+            borderRadius: "8px",
+            borderColor: "var(--color-gray-800)",
+            backgroundColor: "var(--color-bg-dark)",
+          }}
         >
           <Box className="flex items-center justify-between text-xs text-graybrand-200">
             <span className="uppercase tracking-[0.18em]">Mic volume</span>
@@ -890,11 +923,10 @@ function AudioVideoSettings() {
             <Box
               sx={{
                 height: 8,
-                borderRadius: 9999,
+                borderRadius: "9999px",
                 overflow: "hidden",
-                border: "1px solid rgba(148,163,184,0.4)",
-                background:
-                  "linear-gradient(to right, rgba(15,23,42,0.9), rgba(15,23,42,0.9))",
+                border: "1px solid var(--color-gray-700)",
+                backgroundColor: "var(--color-gray-900)",
               }}
             >
               <Box
@@ -902,8 +934,11 @@ function AudioVideoSettings() {
                   width: `${micLevel}%`,
                   height: "100%",
                   transition: "width 80ms linear",
-                  background:
-                    "linear-gradient(90deg, #22c55e, #eab308, #ef4444)",
+                  background: `linear-gradient(
+                    90deg,
+                    var(--color-accent-500),
+                    var(--color-primary-400)
+                  )`,
                 }}
               />
             </Box>
@@ -924,6 +959,9 @@ function AudioVideoSettings() {
               bg-white/5 hover:bg-white/10
               text-graybrand-50
             "
+            sx={{
+              borderRadius: "6px",
+            }}
           >
             {micMonitoring ? "Stop live mic test" : "Start live mic test"}
           </Button>
@@ -932,9 +970,15 @@ function AudioVideoSettings() {
         {/* Output volume + test */}
         <Box
           className="
-            space-y-1.5 rounded-2xl border border-white/10
-            bg-black/20 p-3
+            space-y-1.5
+            border border-white/10
+            p-3
           "
+          sx={{
+            borderRadius: "8px",
+            borderColor: "var(--color-gray-800)",
+            backgroundColor: "var(--color-bg-dark)",
+          }}
         >
           <Box className="flex items-center justify-between text-xs text-graybrand-200">
             <span className="uppercase tracking-[0.18em]">Output volume</span>
@@ -959,6 +1003,9 @@ function AudioVideoSettings() {
               bg-white/5 hover:bg-white/10
               text-graybrand-50
             "
+            sx={{
+              borderRadius: "6px",
+            }}
           >
             {testingOutput ? "Playing tone…" : "Test output"}
           </Button>
@@ -971,6 +1018,9 @@ function AudioVideoSettings() {
           variant="outlined"
           onClick={handleResetAudioSettings}
           className="normal-case border-white/30 text-graybrand-100 hover:border-white/60"
+          sx={{
+            borderRadius: "6px",
+          }}
         >
           Reset
         </Button>
@@ -979,6 +1029,9 @@ function AudioVideoSettings() {
           variant="contained"
           onClick={handleSaveAudioSettings}
           className="normal-case bg-primary-500 hover:bg-primary-400 text-bglight"
+          sx={{
+            borderRadius: "6px",
+          }}
         >
           Save changes
         </Button>
@@ -986,7 +1039,3 @@ function AudioVideoSettings() {
     </Box>
   );
 }
-
-
-
-
