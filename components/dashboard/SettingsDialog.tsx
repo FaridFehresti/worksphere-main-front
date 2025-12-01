@@ -160,9 +160,10 @@ export default function SettingsDialog({ open, onClose }: SettingsDialogProps) {
                   whitespace-nowrap
                   transition
                   border
-                  ${active
-                    ? "bg-primary-500/15 border-primary-400/70 text-bglight"
-                    : "bg-transparent border-transparent text-graybrand-200 hover:bg-gray-800/80 hover:border-gray-700/80"
+                  ${
+                    active
+                      ? "bg-primary-500/15 border-primary-400/70 text-bglight"
+                      : "bg-transparent border-transparent text-graybrand-200 hover:bg-gray-800/80 hover:border-gray-700/80"
                   }
                 `}
                 style={{ borderRadius: "6px" }}
@@ -327,6 +328,8 @@ function AudioVideoSettings() {
     outputVolume,
     setDevices,
     setVolumes,
+    inputThreshold,
+    setInputThreshold,
   } = useAudioStore();
 
   const [inputDevices, setInputDevices] = useState<MediaDeviceInfo[]>([]);
@@ -361,6 +364,7 @@ function AudioVideoSettings() {
         videoDeviceId?: string | null;
         inputVolume?: number;
         outputVolume?: number;
+        inputThreshold?: number;
       };
 
       setDevices({
@@ -373,11 +377,15 @@ function AudioVideoSettings() {
         input: data.inputVolume ?? inputVolume,
         output: data.outputVolume ?? outputVolume,
       });
+
+      if (typeof data.inputThreshold === "number") {
+        setInputThreshold(data.inputThreshold);
+      }
     } catch (err) {
       console.error("Failed to load saved audio settings", err);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [setDevices, setVolumes]);
+  }, [setDevices, setVolumes, setInputThreshold]);
 
   /* -------- enumerate devices (mic / speakers / camera) -------- */
   useEffect(() => {
@@ -667,6 +675,7 @@ function AudioVideoSettings() {
       videoDeviceId,
       inputVolume,
       outputVolume,
+      inputThreshold,
     };
 
     try {
@@ -695,6 +704,7 @@ function AudioVideoSettings() {
           input: 100,
           output: 100,
         });
+        setInputThreshold(30);
         return;
       }
 
@@ -704,6 +714,7 @@ function AudioVideoSettings() {
         videoDeviceId?: string | null;
         inputVolume?: number;
         outputVolume?: number;
+        inputThreshold?: number;
       };
 
       setDevices({
@@ -716,6 +727,10 @@ function AudioVideoSettings() {
         input: data.inputVolume ?? 100,
         output: data.outputVolume ?? 100,
       });
+
+      setInputThreshold(
+        typeof data.inputThreshold === "number" ? data.inputThreshold : 30,
+      );
     } catch (err) {
       console.error("Failed to reset audio settings", err);
     }
@@ -947,6 +962,30 @@ function AudioVideoSettings() {
               className="text-[10px] text-graybrand-300 mt-0.5 block"
             >
               Live input level
+            </Typography>
+          </Box>
+
+          {/* Input threshold slider */}
+          <Box sx={{ mt: 2 }}>
+            <Box className="flex items-center justify-between text-xs text-graybrand-200">
+              <span className="uppercase tracking-[0.18em]">
+                Input threshold
+              </span>
+              <span>{inputThreshold}</span>
+            </Box>
+            <Slider
+              size="small"
+              min={0}
+              max={100}
+              value={inputThreshold}
+              onChange={(_, v) => setInputThreshold(v as number)}
+            />
+            <Typography
+              variant="caption"
+              className="text-[10px] text-graybrand-300 mt-0.5 block"
+            >
+              Move right if others hear breathing / background noise. Move left
+              if your voice is getting cut off.
             </Typography>
           </Box>
 

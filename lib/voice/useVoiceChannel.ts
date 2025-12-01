@@ -26,10 +26,14 @@ let myStream: MediaStream | null = null;
 // Raw mic stream (direct from getUserMedia)
 let rawMicStream: MediaStream | null = null;
 
-// Web Audio pipeline for input volume control
+// Web Audio pipeline for input volume control + gate
 let micAudioContext: AudioContext | null = null;
 let micGainNode: GainNode | null = null;
 let micSourceNode: MediaStreamAudioSourceNode | null = null;
+let micGateNode: ScriptProcessorNode | null = null;
+
+// Internal amplitude threshold for gate (0–1 range)
+let micGateThreshold = 0.03;
 
 // Ping monitor
 let pingIntervalId: number | null = null;
@@ -200,6 +204,7 @@ export function useVoiceChannel() {
     outputVolume,
     micMuted,
     deafened,
+    inputThreshold,
   } = useAudioStore();
 
   // Local React state mirrors the global voiceState
@@ -215,6 +220,21 @@ export function useVoiceChannel() {
     };
   }, []);
 
+  /* ------------ threshold -> internal gate value ------------ */
+
+  useEffect(() => {
+    // Map 0–100 UI slider -> 0.005–0.1 amplitude range
+    const ui = typeof inputThreshold === "number" ? inputThreshold : 30;
+    const min = 0.005;
+    const max = 0.1;
+    micGateThreshold = min + (max - min) * (ui / 100);
+
+    console.log("[voice-hook] updated mic gate threshold", {
+      ui,
+      micGateThreshold,
+    });
+  }, [inputThreshold]);
+
   /* ------------ helpers: local media ------------ */
 
   const stopLocalStream = useCallback(() => {
@@ -228,6 +248,16 @@ export function useVoiceChannel() {
     if (rawMicStream) {
       rawMicStream.getTracks().forEach((t) => t.stop());
       rawMicStream = null;
+    }
+
+    if (micGateNode) {
+      try {
+        micGateNode.disconnect();
+      } catch {
+        // ignore
+      }
+      micGateNode.onaudioprocess = null;
+      micGateNode = null;
     }
 
     if (micAudioContext) {
@@ -253,26 +283,96 @@ export function useVoiceChannel() {
 
     const buildPipeline = async (
       constraints: MediaStreamConstraints,
-    ): Promise<MediaStream> => {
+    ): Promise<MediaStream | null> => {
       const raw = await navigator.mediaDevices.getUserMedia(constraints);
       console.log("[voice-hook] ensureLocalStream: got raw mic stream");
       rawMicStream = raw;
 
       const audioContext = new AudioContext();
+      micAudioContext = audioContext;
+
       const source = audioContext.createMediaStreamSource(raw);
+      micSourceNode = source;
+
       const gain = audioContext.createGain();
+      micGainNode = gain;
+
       const dest = audioContext.createMediaStreamDestination();
+
+      // 🔊 Noise gate using ScriptProcessorNode
+      const processor = audioContext.createScriptProcessor(1024, 1, 1);
+      micGateNode = processor;
+
+      let gateGain = 0; // smoothed gate (0–1)
+      let gateOpen = false;
+      let loggedFirst = false;
+
+      processor.onaudioprocess = (event: AudioProcessingEvent) => {
+        const input = event.inputBuffer.getChannelData(0);
+        const output = event.outputBuffer.getChannelData(0);
+
+        if (!loggedFirst) {
+          console.log("[voice-hook] mic gate processor is running");
+          loggedFirst = true;
+        }
+
+        // Compute RMS of this frame
+        let sum = 0;
+        for (let i = 0; i < input.length; i++) {
+          const s = input[i];
+          sum += s * s;
+        }
+        const rms = Math.sqrt(sum / input.length) || 0;
+
+        // Hard overrides for debugging:
+        // - if inputThreshold >= 95 -> always closed (mute)
+        // - if inputThreshold <= 5  -> always open (no gate)
+        let isAbove: boolean;
+        if (inputThreshold >= 95) {
+          isAbove = false;
+        } else if (inputThreshold <= 5) {
+          isAbove = true;
+        } else {
+          isAbove = rms >= micGateThreshold;
+        }
+
+        if (isAbove !== gateOpen) {
+          gateOpen = isAbove;
+          console.log(
+            "[voice-hook] gate state change:",
+            gateOpen ? "OPEN" : "CLOSED",
+            "| rms=",
+            rms.toFixed(4),
+            "threshold=",
+            micGateThreshold.toFixed(4),
+            "ui=",
+            inputThreshold,
+          );
+        }
+
+        // Attack / release smoothing
+        const attack = 0.4;
+        const release = 0.1;
+        const target = isAbove ? 1 : 0;
+        const smoothing = isAbove ? attack : release;
+        gateGain += (target - gateGain) * smoothing;
+
+        // Extra hard gate: if gateGain very low, just output silence
+        const effectiveGain = gateGain < 0.01 ? 0 : gateGain;
+
+        for (let i = 0; i < input.length; i++) {
+          output[i] = input[i] * effectiveGain;
+        }
+      };
+
+      // Connect chain: source -> gate -> gain -> dest
+      source.connect(processor);
+      processor.connect(gain);
+      gain.connect(dest);
 
       const vol = typeof inputVolume === "number" ? inputVolume : 100;
       const effective = micMuted ? 0 : vol;
       gain.gain.value = effective / 100;
-
-      source.connect(gain);
-      gain.connect(dest);
-
-      micAudioContext = audioContext;
-      micGainNode = gain;
-      micSourceNode = source;
 
       myStream = dest.stream;
 
@@ -282,6 +382,7 @@ export function useVoiceChannel() {
 
       notify((prev) => ({ ...prev, localStream: dest.stream }));
 
+      console.log("[voice-hook] localStream ready with noise gate chain");
       return dest.stream;
     };
 
@@ -293,7 +394,12 @@ export function useVoiceChannel() {
             inputDeviceId,
           );
           const stream = await buildPipeline({
-            audio: { deviceId: { exact: inputDeviceId } },
+            audio: {
+              deviceId: { exact: inputDeviceId },
+              echoCancellation: true,
+              noiseSuppression: true,
+              autoGainControl: false,
+            },
             video: false,
           });
           return stream;
@@ -306,7 +412,14 @@ export function useVoiceChannel() {
       }
 
       console.log("[voice-hook] retrying getUserMedia with default device");
-      const stream = await buildPipeline({ audio: true, video: false });
+      const stream = await buildPipeline({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: false,
+        },
+        video: false,
+      });
       console.log("[voice-hook] ensureLocalStream: got fallback stream");
       return stream;
     } catch (err) {
@@ -316,7 +429,7 @@ export function useVoiceChannel() {
       );
       return null;
     }
-  }, [inputDeviceId, inputVolume, micMuted]);
+  }, [inputDeviceId, inputVolume, micMuted, inputThreshold]);
 
   // When inputVolume or micMuted changes, update gain
   useEffect(() => {
@@ -436,6 +549,9 @@ export function useVoiceChannel() {
         myStream.getTracks().forEach((track) => {
           pc.addTrack(track, myStream!);
         });
+        console.log(
+          "[voice-hook] added tracks from myStream to RTCPeerConnection",
+        );
       } else if (isInitiator) {
         console.log(
           "[voice-hook] no local stream, adding recvonly audio transceiver",

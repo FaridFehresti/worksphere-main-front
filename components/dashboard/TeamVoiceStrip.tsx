@@ -231,16 +231,33 @@ type PeerProfileMap = Record<
 >;
 
 /**
- * Try to resolve the *database* userId from whatever the voice gateway sends.
- * Adjust this once you see the raw peers in console.
+ * Our voice peer objects come from useVoiceChannel (VoicePeer).
+ * Adjust this if your shape changes.
  */
 const resolvePeerUserId = (peer: any): string | undefined => {
   return (
-    peer.userId || // ideal path (voice gateway sets userId directly)
-    peer.user?.id || // if backend nested full payload: peer.user.id
-    peer.metadata?.userId || // some gateways tuck it under metadata
+    peer.userId ||
+    peer.user?.id ||
+    peer.metadata?.userId ||
     undefined
   );
+};
+
+/**
+ * Normalize whatever fetchUserById returns into a plain User object.
+ * Handles:
+ *  - User
+ *  - { user: User }
+ *  - { data: User }
+ *  - { result: User }
+ */
+const extractUser = (raw: any): User | null => {
+  if (!raw) return null;
+  if (raw.id && raw.email) return raw as User;
+  if (raw.user && raw.user.id) return raw.user as User;
+  if (raw.data && raw.data.id) return raw.data as User;
+  if (raw.result && raw.result.id) return raw.result as User;
+  return null;
 };
 
 export default function TeamVoiceStrip() {
@@ -252,61 +269,62 @@ export default function TeamVoiceStrip() {
 
   const [peerProfiles, setPeerProfiles] = useState<PeerProfileMap>({});
 
-  // Debug peers shape once so we know exactly what we get from backend
+  // Fetch missing peer user profiles
   useEffect(() => {
-    if (!inVoice) return;
-    console.log("[TeamVoiceStrip] raw peers:", peers);
-  }, [inVoice, peers]);
+  if (!inVoice) return;
 
-  // Fetch missing peer user profiles from /users/by-id/:id
-  useEffect(() => {
-    if (!inVoice) return;
+  let cancelled = false;
 
-    let cancelled = false;
+  const userIds = Array.from(
+    new Set(
+      peers
+        .map((p) => resolvePeerUserId(p))
+        .filter((id): id is string => !!id && typeof id === "string"),
+    ),
+  );
 
-    const userIds = Array.from(
-      new Set(
-        peers
-          .map((p) => resolvePeerUserId(p))
-          .filter((id): id is string => !!id && typeof id === "string"),
-      ),
-    );
+  if (userIds.length === 0) return;
 
-    userIds.forEach((userId) => {
-      const existing = peerProfiles[userId];
-      if (existing?.user || existing?.loading) return;
-
-      setPeerProfiles((prev) => ({
+  userIds.forEach((userId) => {
+    setPeerProfiles((prev) => {
+      const existing = prev[userId];
+      if (existing?.user || existing?.loading) {
+        return prev;
+      }
+      return {
         ...prev,
         [userId]: { loading: true },
-      }));
-
-      fetchUserById(userId)
-        .then((user) => {
-          if (cancelled) return;
-          setPeerProfiles((prev) => ({
-            ...prev,
-            [userId]: { loading: false, user },
-          }));
-        })
-        .catch((err) => {
-          if (cancelled) return;
-          console.warn("[TeamVoiceStrip] failed to fetch user", userId, err);
-          setPeerProfiles((prev) => ({
-            ...prev,
-            [userId]: {
-              loading: false,
-              error: String(err),
-            },
-          }));
-        });
+      };
     });
 
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [inVoice, peers]);
+    fetchUserById(userId)
+      .then((raw) => {
+        if (cancelled) return;
+        const user = extractUser(raw);
+        console.log("[TeamVoiceStrip] fetched user", userId, user);
+
+        setPeerProfiles((prev) => ({
+          ...prev,
+          [userId]: { loading: false, user },
+        }));
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        console.warn("[TeamVoiceStrip] failed to fetch user", userId, err);
+        setPeerProfiles((prev) => ({
+          ...prev,
+          [userId]: {
+            loading: false,
+            error: String(err),
+          },
+        }));
+      });
+  });
+
+  return () => {
+    cancelled = true;
+  };
+}, [inVoice, peers]);
 
   const participants: TileProps[] = useMemo(() => {
     const arr: TileProps[] = [];
@@ -330,7 +348,6 @@ export default function TeamVoiceStrip() {
     // Remote peers
     peers.forEach((peer) => {
       const userId = resolvePeerUserId(peer);
-
       const profile =
         userId && peerProfiles[userId] ? peerProfiles[userId].user : undefined;
 
@@ -338,13 +355,17 @@ export default function TeamVoiceStrip() {
         profile?.name ||
         (profile as any)?.username ||
         profile?.email ||
-        (userId ?? "Unknown User");
+        userId ||
+        "Unknown user";
 
-      const avatarUrl = (profile as any)?.avatarUrl ?? undefined;
+      const avatarUrl =
+        (profile as any)?.avatarUrl ??
+        (profile as any)?.imageUrl ??
+        null;
 
       arr.push({
         label,
-        avatarUrl,
+        avatarUrl: avatarUrl ?? undefined,
         isSelf: false,
         micMuted: peer.micMuted,
         deafened: peer.deafened,

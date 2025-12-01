@@ -1,59 +1,89 @@
-// lib/store/audio.ts
+// lib/audio.ts
 "use client";
 
 import { create } from "zustand";
-import { persist } from "zustand/middleware";
+
+type Devices = {
+  input: string | null;
+  output: string | null;
+  video: string | null;
+};
+
+type Volumes = {
+  input: number;
+  output: number;
+};
 
 type AudioState = {
-  micMuted: boolean;
-  deafened: boolean;
+  // Devices
   inputDeviceId: string | null;
   outputDeviceId: string | null;
   videoDeviceId: string | null;
+
+  // Volumes
   inputVolume: number;
   outputVolume: number;
+
+  // Audio state
+  micMuted: boolean;
+  deafened: boolean;
+
+  // 🔊 New: input threshold (0–100 UI value)
+  inputThreshold: number;
+
+  // Actions
+  setDevices: (devices: Devices) => void;
+  setVolumes: (volumes: Volumes) => void;
+
+  setInputThreshold: (value: number) => void;
+
   toggleMicMuted: () => void;
   toggleDeafened: () => void;
-  setDevices: (opts: {
-    input: string | null;
-    output: string | null;
-    video: string | null;
-  }) => void;
-  setVolumes: (opts: { input: number; output: number }) => void;
 };
 
-export const useAudioStore = create<AudioState>()(
-  persist(
-    (set) => ({
-      micMuted: false,
-      deafened: false,
-      inputDeviceId: null,
-      outputDeviceId: null,
-      videoDeviceId: null,
-      inputVolume: 80,
-      outputVolume: 80,
+export const useAudioStore = create<AudioState>()((set) => ({
+  // Devices
+  inputDeviceId: null,
+  outputDeviceId: null,
+  videoDeviceId: null,
 
-      toggleMicMuted: () =>
-        set((s) => ({ micMuted: !s.micMuted })),
+  // Volumes
+  inputVolume: 100,
+  outputVolume: 100,
 
-      toggleDeafened: () =>
-        set((s) => ({ deafened: !s.deafened })),
+  // Audio state
+  micMuted: false,
+  deafened: false,
 
-      setDevices: ({ input, output, video }) =>
-        set(() => ({
-          inputDeviceId: input,
-          outputDeviceId: output,
-          videoDeviceId: video,
-        })),
+  // 🔊 New: sensible default threshold
+  inputThreshold: 30,
 
-      setVolumes: ({ input, output }) =>
-        set(() => ({
-          inputVolume: input,
-          outputVolume: output,
-        })),
-    }),
-    {
-      name: "worksphere-audio-settings",
-    }
-  )
-);
+  // Actions
+  setDevices: ({ input, output, video }) =>
+    set(() => ({
+      inputDeviceId: input,
+      outputDeviceId: output,
+      videoDeviceId: video,
+    })),
+
+  setVolumes: ({ input, output }) =>
+    set(() => ({
+      inputVolume: input,
+      outputVolume: output,
+    })),
+
+  setInputThreshold: (value: number) =>
+    set(() => ({
+      inputThreshold: value,
+    })),
+
+  toggleMicMuted: () =>
+    set((state) => ({
+      micMuted: !state.micMuted,
+    })),
+
+  toggleDeafened: () =>
+    set((state) => ({
+      deafened: !state.deafened,
+    })),
+}));
